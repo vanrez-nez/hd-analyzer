@@ -1,0 +1,12 @@
+[package]
+name = "hd-analyzer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+crossterm = "0.29"
+humansize = "2.1"
+ratatui = "0.29"
+rayon = "1.11.0"
+sysinfo = "0.37"
