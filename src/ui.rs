@@ -11,19 +11,19 @@ use crate::app::{
     App, CategoryUsage, FileKind, ScanResult, Screen, compact_path, format_bytes, format_ratio,
 };
 
-// Rich Colors (Catppuccin Macchiato)
-const TEXT: Color = Color::Rgb(202, 211, 245);
-const SUBTEXT: Color = Color::Rgb(165, 173, 203);
-const OVERLAY: Color = Color::Rgb(54, 58, 79);
-const GREEN: Color = Color::Rgb(166, 218, 149);
-const YELLOW: Color = Color::Rgb(238, 212, 159);
-const BLUE: Color = Color::Rgb(138, 173, 244);
-const MAGENTA: Color = Color::Rgb(245, 189, 230);
-const RED: Color = Color::Rgb(237, 135, 150);
-const TEAL: Color = Color::Rgb(139, 213, 202);
-const ROSEWATER: Color = Color::Rgb(244, 219, 214);
-const MANTLE: Color = Color::Rgb(30, 32, 48);
-const CRUST: Color = Color::Rgb(24, 25, 38);
+// Rich Colors (Superfile / Catppuccin Mocha)
+const TEXT: Color = Color::Rgb(205, 214, 244);
+const SUBTEXT: Color = Color::Rgb(166, 173, 200);
+const OVERLAY: Color = Color::Rgb(88, 91, 112);
+const GREEN: Color = Color::Rgb(166, 227, 161);
+const YELLOW: Color = Color::Rgb(249, 226, 175);
+const BLUE: Color = Color::Rgb(137, 180, 250);
+const MAGENTA: Color = Color::Rgb(245, 194, 231);
+const RED: Color = Color::Rgb(243, 139, 168);
+const TEAL: Color = Color::Rgb(148, 226, 213);
+const ROSEWATER: Color = Color::Rgb(245, 224, 220);
+const MANTLE: Color = Color::Rgb(49, 50, 68);
+const CRUST: Color = Color::Rgb(17, 17, 27);
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -58,7 +58,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(OVERLAY));
+        .border_style(Style::default().fg(MAGENTA));
     
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
@@ -70,7 +70,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 
     let title_para = Paragraph::new(Span::styled(
         title,
-        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        Style::default().fg(MAGENTA).add_modifier(Modifier::BOLD),
     ));
     frame.render_widget(title_para, chunks[0]);
 
