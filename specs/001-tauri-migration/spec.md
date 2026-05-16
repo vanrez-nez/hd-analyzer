@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "we need to plan to migrate current app into use tauri instead of a cli backend"
+**Input**: User description: "we need to plan to migrate current app into use tauri instead of a cli backend; we need to use shadcn for the front-end tauri app"
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -71,12 +71,34 @@ shows hidden/unscanned space plus a readable error log.
 
 ---
 
+### User Story 4 - Use Consistent Desktop Components (Priority: P3)
+
+As a user, I experience the desktop analyzer through a consistent, polished component system that
+makes controls, dense scan results, dialogs, and error states predictable.
+
+**Why this priority**: Migrating to desktop should improve usability without forcing every screen
+to invent its own visual and interaction patterns.
+
+**Independent Test**: Inspect the drive selection, scan explorer, category distribution, rescan
+controls, and error log screens and verify they use the same component language, spacing, focus
+states, and accessible control behavior.
+
+**Acceptance Scenarios**:
+
+1. **Given** the user moves between desktop screens, **When** controls and result panels are shown,
+   **Then** buttons, tables, cards, dialogs, and status indicators follow one shared design system.
+2. **Given** a user navigates by keyboard, **When** focus moves through actions and result controls,
+   **Then** focused elements are visible and activation behavior is consistent.
+
+---
+
 ### Edge Cases
 
 - What happens when a scan is already running and the user starts another scan?
 - How does the app handle access-denied paths, skipped hidden entries, symlinks, and filesystem
   boundaries?
 - How does the desktop layout behave in small windows and high-density result sets?
+- How does the component system handle dense directory tables without wasting screen space?
 - What happens when the app is closed while a scan thread is still running?
 - How are platform-specific permission differences explained to the user?
 
@@ -102,6 +124,11 @@ shows hidden/unscanned space plus a readable error log.
   states in the desktop UI.
 - **FR-010**: System MUST provide an implementation path that separates reusable Rust scan logic
   from the desktop UI shell.
+- **FR-011**: System MUST use shadcn/ui as the desktop frontend component system.
+- **FR-012**: System MUST use accessible, keyboard-operable components for primary actions,
+  navigation controls, dense tables, dialogs, and error states.
+- **FR-013**: System MUST keep scan result views dense enough for repeated analysis work while
+  preserving readable spacing, focus states, and responsive desktop window behavior.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -130,10 +157,13 @@ shows hidden/unscanned space plus a readable error log.
   entry policy, and allocated-size calculation is preserved unless explicitly documented.
 - **SC-006**: The migration plan identifies the reusable Rust core, desktop command boundary, and
   UI state transitions before implementation begins.
+- **SC-007**: Core desktop screens use a shared component system so primary actions and result
+  controls behave consistently across drive selection, scanning, exploration, and error review.
 
 ## Assumptions
 
 - Tauri is a required delivery constraint from the user request.
+- shadcn/ui is a required frontend component constraint from the user request.
 - The first migration target is the current local desktop development platform; cross-platform
   packaging can be planned after the core desktop migration works.
 - The current Rust scanner remains the source of truth for filesystem analysis.

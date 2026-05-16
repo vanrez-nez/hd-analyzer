@@ -11,16 +11,17 @@
 Migrate HD Analyzer from a terminal-first application into a Tauri v2 desktop application while
 preserving the current Rust filesystem scanner as the source of truth. The plan extracts scan,
 drive, category, path, and permission/error behavior into a reusable Rust core, adds a Tauri shell
-with typed IPC commands and scan progress streaming, and builds a desktop UI for drive selection,
-scan progress, result browsing, category distribution, subtree rescans, and permission-gap review.
+with typed IPC commands and scan progress streaming, and builds a shadcn/ui-based desktop UI for
+drive selection, scan progress, result browsing, category distribution, subtree rescans, and
+permission-gap review.
 
 ## Technical Context
 
-**Language/Version**: Rust 2024 for scanner/core/Tauri backend; TypeScript for the desktop frontend
+**Language/Version**: Rust 2024 for scanner/core/Tauri backend; TypeScript + React for the desktop frontend
 
 **Primary Dependencies**: Existing Rust dependencies (`anyhow`, `humansize`, `rayon`, `sysinfo`);
-add Tauri v2 (`tauri`, `tauri-build`, `tauri-cli`), Serde for IPC DTOs, and a lightweight Vite +
-vanilla TypeScript frontend
+add Tauri v2 (`tauri`, `tauri-build`, `tauri-cli`), Serde for IPC DTOs, Vite + React, Tailwind CSS,
+shadcn/ui, Radix-backed shadcn components, `lucide-react`, and shadcn utility dependencies
 
 **Storage**: Local filesystem metadata only; no persistent application storage in this phase
 
@@ -39,7 +40,7 @@ than raw file lists
 **Constraints**: Preserve symlink skipping, filesystem-boundary behavior, allocated-size
 calculation, hidden/skipped entry policy, read-error reporting, and hidden/unscanned-space
 separation; do not request broad filesystem plugin permissions when Rust commands can own scanning
-directly
+directly; all desktop screens must use shadcn/ui for shared controls and dense UI primitives
 
 **Scale/Scope**: Single-user local drive analysis across large directory trees; migration does not
 include signed installers, auto-update, mobile targets, or privileged helper installation
@@ -55,7 +56,7 @@ include signed installers, auto-update, mobile targets, or privileged helper ins
 - **Terminal UX Is the Product**: JUSTIFIED VIOLATION. This feature intentionally changes the
   primary product surface from TUI to Tauri desktop because the user explicitly requested migration
   away from the CLI/TUI backend. Existing keyboard and navigation affordances will be mapped into
-  desktop equivalents where useful.
+  shadcn/ui desktop equivalents where useful.
 - **Permission-Aware Transparency**: PASS. Read errors and hidden/unscanned space remain first-class
   result data exposed in the desktop UI.
 - **Testable Rust Core**: PASS. The migration extracts deterministic scan logic into a testable core
@@ -72,6 +73,7 @@ specs/001-tauri-migration/
 ├── data-model.md
 ├── quickstart.md
 ├── contracts/
+│   ├── frontend-ui.md
 │   └── tauri-ipc.md
 └── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
 ```
@@ -109,23 +111,31 @@ src-web/
 ├── package.json
 ├── index.html
 ├── tsconfig.json
+├── tsconfig.app.json
 ├── vite.config.ts
+├── components.json
 └── src/
-    ├── main.ts
+    ├── main.tsx
+    ├── App.tsx
     ├── api.ts           # Tauri invoke/channel wrapper
     ├── state.ts
+    ├── lib/
+    │   └── utils.ts     # shadcn className helper
+    ├── components/
+    │   └── ui/          # shadcn/ui generated components
     ├── styles.css
     └── views/
-        ├── DriveSelection.ts
-        ├── ScanExplorer.ts
-        └── ErrorLog.ts
+        ├── DriveSelection.tsx
+        ├── ScanExplorer.tsx
+        └── ErrorLog.tsx
 tests/
 └── core_regression.rs   # Integration tests when unit tests are insufficient
 ```
 
 **Structure Decision**: Use a Rust workspace so the scanner is reusable by both the Tauri backend
-and any temporary CLI/TUI wrapper. Put Tauri-specific code in `src-tauri/` and frontend code in
-`src-web/`, matching Tauri's manual setup model for an existing project.
+and any temporary CLI/TUI wrapper. Put Tauri-specific code in `src-tauri/` and a Vite React +
+shadcn/ui frontend in `src-web/`, matching Tauri's manual setup model for an existing project and
+shadcn/ui's Vite setup.
 
 ## Complexity Tracking
 
@@ -133,14 +143,14 @@ and any temporary CLI/TUI wrapper. Put Tauri-specific code in `src-tauri/` and f
 |-----------|------------|-------------------------------------|
 | Terminal UX Is the Product | The requested feature changes HD Analyzer from TUI-first to Tauri desktop-first. | Keeping the Ratatui UI as the primary surface would not satisfy "use tauri instead of a cli backend". |
 | Workspace split into core, optional CLI, and Tauri app | Separates scanner behavior from desktop shell and keeps deterministic logic testable. | Directly embedding current `src/app.rs` into `src-tauri` would couple UI state, scanner state, and IPC, making progress streaming and regression tests harder. |
+| React frontend added for shadcn/ui | shadcn/ui's official Vite setup targets React + TypeScript and generated component files. | Staying with vanilla TypeScript would not satisfy the requested component system. |
 
 ## Phase 0 Research Summary
 
 See [research.md](./research.md). Key decisions:
 
 - Use Tauri v2 with manual initialization in the existing repo.
-- Use vanilla TypeScript + Vite for the first frontend to avoid adding framework complexity before
-  the migration proves the Rust/IPC boundary.
+- Use Vite + React + shadcn/ui for the frontend because shadcn/ui is now a project requirement.
 - Use typed Tauri commands for request/response operations and a streaming channel or event path
   for scan progress.
 - Use Tauri capabilities conservatively; avoid broad filesystem frontend permissions because Rust
@@ -148,8 +158,8 @@ See [research.md](./research.md). Key decisions:
 
 ## Phase 1 Design Summary
 
-See [data-model.md](./data-model.md), [contracts/tauri-ipc.md](./contracts/tauri-ipc.md), and
-[quickstart.md](./quickstart.md).
+See [data-model.md](./data-model.md), [contracts/tauri-ipc.md](./contracts/tauri-ipc.md),
+[contracts/frontend-ui.md](./contracts/frontend-ui.md), and [quickstart.md](./quickstart.md).
 
 **Post-design Constitution Check**:
 
@@ -158,7 +168,8 @@ See [data-model.md](./data-model.md), [contracts/tauri-ipc.md](./contracts/tauri
 - **Accurate Filesystem Semantics**: PASS. Domain entities preserve allocated bytes, read errors,
   category totals, symlink skipping, and filesystem-boundary behavior.
 - **Terminal UX Is the Product**: JUSTIFIED VIOLATION remains. The desktop UI replaces the terminal
-  surface by design; keyboard affordances are retained as secondary accessibility controls.
+  surface by design; keyboard affordances are retained through shadcn/ui/Radix-style accessible
+  controls where applicable.
 - **Permission-Aware Transparency**: PASS. `ReadError` and hidden/unscanned rows are part of the IPC
   contract and UI states.
 - **Testable Rust Core**: PASS. Core extraction and DTO mapping are independently testable before

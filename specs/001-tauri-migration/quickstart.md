@@ -13,8 +13,11 @@
 2. Move deterministic scanner/domain logic into `crates/hd-analyzer-core`.
 3. Add `src-tauri/` with Tauri v2 configuration, conservative main-window capability, backend
    state, and registered commands from `contracts/tauri-ipc.md`.
-4. Add `src-web/` as a Vite + vanilla TypeScript frontend.
-5. Implement frontend views for drive selection, scan explorer, category distribution, and error
+4. Add `src-web/` as a Vite + React + TypeScript frontend.
+5. Configure Tailwind CSS, the `@/*` import alias, and shadcn/ui.
+6. Add shadcn/ui components needed for the first pass: button, card, table, tabs, dialog, progress,
+   scroll-area, badge, separator, tooltip, and alert.
+7. Implement frontend views for drive selection, scan explorer, category distribution, and error
    log.
 
 ## Local Validation
@@ -30,6 +33,8 @@ Run frontend checks from `src-web/`:
 
 ```bash
 pnpm install
+pnpm dlx shadcn@latest init
+pnpm dlx shadcn@latest add button card table tabs dialog progress scroll-area badge separator tooltip alert
 pnpm run typecheck
 pnpm run build
 ```
@@ -50,6 +55,8 @@ cargo tauri dev
 6. Scan a path expected to produce permission errors and confirm unreadable paths appear in the
    error log.
 7. Confirm hidden/unscanned space is separated from scanned directory totals at the scan root.
+8. Confirm primary controls, tables, dialogs, progress states, badges, and tooltips use the shared
+   shadcn/ui component system and have visible keyboard focus states.
 
 ## Build Check
 

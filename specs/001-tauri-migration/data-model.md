@@ -149,3 +149,23 @@ Frontend state derived from backend snapshots and user navigation.
 
 - UI state MUST tolerate backend scan progress arriving while the user navigates.
 - The frontend MUST treat backend scan data as authoritative.
+
+## ComponentSurface
+
+Represents the required shadcn/ui-backed desktop component coverage.
+
+**Fields**:
+
+- `surface`: `drive_selection | scan_explorer | category_distribution | error_log | dialogs`
+- `components`: shadcn/ui component names used by the surface
+- `keyboardPaths`: primary keyboard interactions supported by the surface
+- `density`: `compact | standard`, based on the amount of scan data shown
+- `statusStates`: loading, scanning, complete, empty, error, and partial-rescan states visible on
+  the surface
+
+**Validation Rules**:
+
+- Primary actions MUST use shared shadcn/ui button patterns.
+- Dense directory and category views MUST use table/list primitives with stable row sizing.
+- Dialog, tooltip, progress, badge, alert, and tab behavior MUST be consistent across screens.
+- Focus states MUST be visible for keyboard navigation.

@@ -14,19 +14,26 @@ configuration files. Official docs also show `cargo tauri dev` as a valid develo
 
 Source: https://v2.tauri.app/start/create-project/
 
-## Decision: Use vanilla TypeScript + Vite for the first desktop frontend
+## Decision: Use Vite + React + shadcn/ui for the desktop frontend
 
-**Rationale**: Tauri supports many frontend frameworks and also recommends vanilla TypeScript as a
-simple starting point. HD Analyzer currently has no web frontend, so avoiding React/Svelte/Vue keeps
-the first migration focused on scanner extraction, IPC, and desktop state.
+**Rationale**: shadcn/ui is now an explicit project requirement. The official shadcn/ui Vite
+installation path uses React + TypeScript, Tailwind CSS, Vite alias configuration, and generated
+components under the app source tree. This gives the desktop app a consistent component system for
+buttons, cards, tables, dialogs, tabs, progress indicators, and dense analyzer views while keeping
+the frontend compatible with Tauri's Vite workflow.
 
 **Alternatives considered**:
 
-- React/Svelte/Vue: good future options, but unnecessary for the first migration surface.
-- Rust web frontend with Leptos/Yew: keeps a Rust-only stack but adds WASM/build complexity before
-  the desktop migration is proven.
+- Vanilla TypeScript + Vite: rejected because it no longer satisfies the shadcn/ui requirement.
+- Rust web frontend with Leptos/Yew: rejected because shadcn/ui is React-oriented in the official
+  Vite setup and a Rust web frontend would add WASM/build complexity before the desktop migration is
+  proven.
+- Non-shadcn component libraries: rejected because the user explicitly requested shadcn.
 
-Source: https://v2.tauri.app/start/create-project/
+Sources:
+
+- https://ui.shadcn.com/docs/installation/vite
+- https://v2.tauri.app/start/create-project/
 
 ## Decision: Extract scanner/domain logic into `crates/hd-analyzer-core`
 
