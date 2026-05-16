@@ -3,8 +3,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Alignment, Color, Line, Modifier, Span, Style};
 use ratatui::text::Text;
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
-    TableState, Wrap,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap,
 };
 
 use crate::app::{
@@ -59,7 +58,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(MAGENTA));
-    
+
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
@@ -79,12 +78,17 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             let total = result.total_bytes();
             let drive = app.drives.iter().find(|d| d.mount_point == result.root);
             let drive_usage = drive.map(|d| d.used_space()).unwrap_or(total).max(total);
-            let status = if result.completed_at.is_some() { "Complete" } else { "Scanning" };
+            let status = if result.completed_at.is_some() {
+                "Complete"
+            } else {
+                "Scanning"
+            };
 
-            format!("{} (Elapsed: {}) | {} / {} ", 
-                status, 
-                format_elapsed(result.elapsed()), 
-                format_bytes(total), 
+            format!(
+                "{} (Elapsed: {}) | {} / {} ",
+                status,
+                format_elapsed(result.elapsed()),
+                format_bytes(total),
                 format_bytes(drive_usage)
             )
         } else {
@@ -142,7 +146,12 @@ fn draw_drive_selection(frame: &mut Frame, area: Rect, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BLUE)),
         )
-        .highlight_style(Style::default().bg(OVERLAY).fg(TEXT).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(OVERLAY)
+                .fg(TEXT)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol(">> ");
 
     let mut state = ListState::default().with_selected(Some(app.selected_drive));
@@ -150,7 +159,9 @@ fn draw_drive_selection(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_results(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(result) = &app.result else { return; };
+    let Some(result) = &app.result else {
+        return;
+    };
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
@@ -164,7 +175,7 @@ fn draw_results(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_largest_directories(frame: &mut Frame, area: Rect, app: &App, result: &ScanResult) {
     let total = result.total_bytes();
     let entries = app.current_directory_entries();
-    
+
     // Breadcrumb style title
     let mut title_spans = vec![Span::raw(" Explorer: ")];
     if let Some(path) = app.current_result_path() {
@@ -185,13 +196,26 @@ fn draw_largest_directories(frame: &mut Frame, area: Rect, app: &App, result: &S
     let mut rows: Vec<_> = entries
         .iter()
         .map(|entry| {
-            let name = entry.path.file_name().and_then(|n| n.to_str()).unwrap_or("..");
+            let name = entry
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("..");
             let is_root = entry.path == result.root;
             let display_name = if is_root { ".." } else { name };
             Row::new(vec![
-                Cell::from(Span::styled(format!("📁 {}", display_name), Style::default().fg(TEXT))),
-                Cell::from(Span::styled(format_bytes(entry.size), Style::default().fg(YELLOW))),
-                Cell::from(Span::styled(format_ratio(entry.size, total), Style::default().fg(SUBTEXT))),
+                Cell::from(Span::styled(
+                    format!("📁 {}", display_name),
+                    Style::default().fg(TEXT),
+                )),
+                Cell::from(Span::styled(
+                    format_bytes(entry.size),
+                    Style::default().fg(YELLOW),
+                )),
+                Cell::from(Span::styled(
+                    format_ratio(entry.size, total),
+                    Style::default().fg(SUBTEXT),
+                )),
             ])
         })
         .collect();
@@ -203,8 +227,14 @@ fn draw_largest_directories(frame: &mut Frame, area: Rect, app: &App, result: &S
             if drive_used > total + 1_000_000 {
                 let hidden = drive_used - total;
                 rows.push(Row::new(vec![
-                    Cell::from(Span::styled("🔒  Hidden / Unscanned", Style::default().fg(OVERLAY))),
-                    Cell::from(Span::styled(format_bytes(hidden), Style::default().fg(OVERLAY))),
+                    Cell::from(Span::styled(
+                        "🔒  Hidden / Unscanned",
+                        Style::default().fg(OVERLAY),
+                    )),
+                    Cell::from(Span::styled(
+                        format_bytes(hidden),
+                        Style::default().fg(OVERLAY),
+                    )),
                     Cell::from(Span::styled("---", Style::default().fg(OVERLAY))),
                 ]));
             }
@@ -220,12 +250,9 @@ fn draw_largest_directories(frame: &mut Frame, area: Rect, app: &App, result: &S
         ],
     )
     .header(
-        Row::new(vec!["Directory", "Size", "Share"]).style(
-            Style::default()
-                .fg(BLUE)
-                .add_modifier(Modifier::BOLD),
-        )
-        .bottom_margin(1),
+        Row::new(vec!["Directory", "Size", "Share"])
+            .style(Style::default().fg(BLUE).add_modifier(Modifier::BOLD))
+            .bottom_margin(1),
     )
     .block(
         Block::default()
@@ -243,7 +270,10 @@ fn draw_largest_directories(frame: &mut Frame, area: Rect, app: &App, result: &S
 
 fn draw_categories(frame: &mut Frame, area: Rect, result: &ScanResult) {
     if result.categories.is_empty() {
-        let block = Block::default().title(" Space By File Type").borders(Borders::ALL).border_style(Style::default().fg(OVERLAY));
+        let block = Block::default()
+            .title(" Space By File Type")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(OVERLAY));
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
         return;
@@ -293,53 +323,73 @@ fn draw_categories(frame: &mut Frame, area: Rect, result: &ScanResult) {
         ],
     )
     .header(
-        Row::new(vec!["Type", "Size", "Share"]).style(
-            Style::default()
-                .fg(SUBTEXT)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Row::new(vec!["Type", "Size", "Share"])
+            .style(Style::default().fg(SUBTEXT).add_modifier(Modifier::BOLD)),
     )
     .column_spacing(1);
 
-    let legend_block = Block::default().title(" Legend").borders(Borders::ALL).border_style(Style::default().fg(OVERLAY));
+    let legend_block = Block::default()
+        .title(" Legend")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(OVERLAY));
     let legend_inner = legend_block.inner(sections[1]);
     frame.render_widget(legend_block, sections[1]);
-    
+
     let inner_sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(legend_inner);
 
     frame.render_widget(table, inner_sections[0]);
-    
+
     let summary = Line::from(vec![
         Span::styled(format!(" Total: "), Style::default().fg(SUBTEXT)),
-        Span::styled(format!("{} files, {} dirs", result.files_scanned, result.directories_scanned), Style::default().fg(TEXT)),
+        Span::styled(
+            format!(
+                "{} files, {} dirs",
+                result.files_scanned, result.directories_scanned
+            ),
+            Style::default().fg(TEXT),
+        ),
     ]);
-    frame.render_widget(Paragraph::new(summary).alignment(Alignment::Left), inner_sections[1]);
+    frame.render_widget(
+        Paragraph::new(summary).alignment(Alignment::Left),
+        inner_sections[1],
+    );
 }
 
 fn draw_error_log(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(result) = &app.result else { return; };
-    
-    let items: Vec<ListItem> = result.read_errors.iter().map(|err| {
-        let path = compact_path(&err.path, &result.root);
-        let content = vec![
-            Line::from(vec![
-                Span::styled("🔒 ", Style::default().fg(RED)),
-                Span::styled(path, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(vec![
-                Span::raw("   "),
-                Span::styled(&err.error, Style::default().fg(SUBTEXT)),
-            ]),
-            Line::from(vec![Span::raw("")]),
-        ];
-        ListItem::new(content)
-    }).collect();
+    let Some(result) = &app.result else {
+        return;
+    };
+
+    let items: Vec<ListItem> = result
+        .read_errors
+        .iter()
+        .map(|err| {
+            let path = compact_path(&err.path, &result.root);
+            let content = vec![
+                Line::from(vec![
+                    Span::styled("🔒 ", Style::default().fg(RED)),
+                    Span::styled(path, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(&err.error, Style::default().fg(SUBTEXT)),
+                ]),
+                Line::from(vec![Span::raw("")]),
+            ];
+            ListItem::new(content)
+        })
+        .collect();
 
     let list = ratatui::widgets::List::new(items)
-        .block(Block::default().title(" Permission Denied ").borders(Borders::ALL).border_style(Style::default().fg(RED)))
+        .block(
+            Block::default()
+                .title(" Permission Denied ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(RED)),
+        )
         .highlight_style(Style::default().bg(MANTLE));
 
     let mut state = ratatui::widgets::ListState::default().with_selected(Some(app.error_scroll));
@@ -349,7 +399,9 @@ fn draw_error_log(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
     let help = match app.screen {
         Screen::SelectDrive => "↑/↓/j/k: Select   Enter: Scan   q: Quit",
-        Screen::Results => "↑/↓/j/k: Select   Enter/l: Open   Backspace/h: Parent   r: Rescan   s: Drives   q: Quit",
+        Screen::Results => {
+            "↑/↓/j/k: Select   Enter/l: Open   Backspace/h: Parent   r: Rescan   s: Drives   q: Quit"
+        }
         Screen::ErrorLog => "↑/↓/j/k: Scroll   Esc/Backspace/h: Go Back   q: Quit",
     };
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HD Analyzer",
+  "version": "0.1.0",
+  "identifier": "dev.vanrez.hd-analyzer",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../src-web run dev",
+    "beforeBuildCommand": "npm --prefix ../src-web run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../src-web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HD Analyzer",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 920,
+        "minHeight": 620
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["../preview.png"]
+  }
+}

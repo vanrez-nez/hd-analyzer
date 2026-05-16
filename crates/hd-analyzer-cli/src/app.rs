@@ -5,14 +5,13 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use humansize::{DECIMAL, format_size};
 use rayon::prelude::*;
 use sysinfo::Disks;
-
 
 #[derive(Debug, Clone)]
 pub struct Drive {
@@ -105,7 +104,9 @@ impl ScanResult {
     }
 
     pub fn elapsed(&self) -> Duration {
-        self.completed_at.unwrap_or_else(Instant::now).saturating_duration_since(self.started_at)
+        self.completed_at
+            .unwrap_or_else(Instant::now)
+            .saturating_duration_since(self.started_at)
     }
 }
 
@@ -243,21 +244,23 @@ impl App {
 
     pub fn rescan(&mut self) {
         let entries = self.current_directory_entries();
-        if self.selected_result_entry >= entries.len() { return; }
-        
+        if self.selected_result_entry >= entries.len() {
+            return;
+        }
+
         let entry = &entries[self.selected_result_entry];
         let path_to_scan = entry.path.clone();
 
         self.rescan_focused_path = Some(path_to_scan.clone());
-        
+
         let started_at = Instant::now();
         let (tx, rx) = mpsc::channel();
-        
+
         thread::spawn(move || {
             let outcome = scan_drive(&path_to_scan, started_at, &tx, true);
             let _ = tx.send(ScanUpdate::PartialFinished(outcome));
         });
-        
+
         self.scanner = Some(rx);
     }
 
@@ -282,7 +285,11 @@ impl App {
 
         while let Ok(update) = receiver.try_recv() {
             match update {
-                ScanUpdate::Snapshot { progress, directory_sizes, categories_map } => {
+                ScanUpdate::Snapshot {
+                    progress,
+                    directory_sizes,
+                    categories_map,
+                } => {
                     latest_snapshot = Some((progress, directory_sizes, categories_map));
                 }
                 ScanUpdate::Finished(scan_result) => {
@@ -315,28 +322,41 @@ impl App {
                     if is_partial_finished {
                         if let Some(existing_result) = &mut self.result {
                             let target_path = final_result.root.clone();
-                            let old_size = existing_result.directory_sizes.get(&target_path).copied().unwrap_or(0);
+                            let old_size = existing_result
+                                .directory_sizes
+                                .get(&target_path)
+                                .copied()
+                                .unwrap_or(0);
                             let new_size = final_result.bytes_scanned;
                             let delta = new_size as i64 - old_size as i64;
 
-                            existing_result.directory_sizes.retain(|k, _| !k.starts_with(&target_path));
-                            existing_result.directory_sizes.extend(final_result.directory_sizes);
+                            existing_result
+                                .directory_sizes
+                                .retain(|k, _| !k.starts_with(&target_path));
+                            existing_result
+                                .directory_sizes
+                                .extend(final_result.directory_sizes);
 
                             let mut current = target_path.parent();
                             while let Some(p) = current {
                                 if p.starts_with(&existing_result.root) {
-                                    let s = existing_result.directory_sizes.entry(p.to_path_buf()).or_insert(0);
+                                    let s = existing_result
+                                        .directory_sizes
+                                        .entry(p.to_path_buf())
+                                        .or_insert(0);
                                     *s = (*s as i64 + delta).max(0) as u64;
                                 }
                                 current = p.parent();
                             }
-                            existing_result.bytes_scanned = (existing_result.bytes_scanned as i64 + delta).max(0) as u64;
+                            existing_result.bytes_scanned =
+                                (existing_result.bytes_scanned as i64 + delta).max(0) as u64;
                         }
                     } else {
                         final_result.completed_at = Some(Instant::now());
                         if self.result_path.is_none() {
                             self.result_path = Some(final_result.root.clone());
-                            self.current_subdirs = Some(load_current_subdirectories(&final_result.root));
+                            self.current_subdirs =
+                                Some(load_current_subdirectories(&final_result.root));
                             self.selected_result_entry = 0;
                         }
                         self.result = Some(final_result);
@@ -352,7 +372,7 @@ impl App {
                     }
                 }
             }
-            
+
             if let Some(focused) = self.rescan_focused_path.take() {
                 let entries = self.current_directory_entries();
                 if let Some(pos) = entries.iter().position(|e| e.path == focused) {
@@ -438,7 +458,7 @@ impl App {
         let entries = self.current_directory_entries();
         if self.selected_result_entry < entries.len() {
             let entry = &entries[self.selected_result_entry];
-            
+
             if entry.path.to_str() == Some("HIDDEN_SPACE_VIRTUAL_NODE") {
                 self.screen = Screen::ErrorLog;
                 self.error_scroll = 0;
@@ -616,7 +636,10 @@ fn scan_drive_parallel(
                 let mut current = path.as_path();
                 while current != root_clone {
                     if let Some(parent) = current.parent() {
-                        *state.directory_sizes.entry(parent.to_path_buf()).or_default() += size;
+                        *state
+                            .directory_sizes
+                            .entry(parent.to_path_buf())
+                            .or_default() += size;
                         current = parent;
                     } else {
                         break;
@@ -649,11 +672,15 @@ fn scan_drive_parallel(
     // Drop the sender so the aggregator thread knows we are done sending.
     drop(local_tx);
 
-    let mut final_state = aggregator_thread.join().expect("Aggregator thread panicked");
+    let mut final_state = aggregator_thread
+        .join()
+        .expect("Aggregator thread panicked");
 
     let categories = collect_categories(final_state.categories);
     if !final_state.directory_sizes.contains_key(root) {
-        final_state.directory_sizes.insert(root.to_path_buf(), final_state.bytes_scanned);
+        final_state
+            .directory_sizes
+            .insert(root.to_path_buf(), final_state.bytes_scanned);
     }
     let read_errors = errors.lock().unwrap().clone();
     Ok(ScanResult {
@@ -694,7 +721,7 @@ fn walk_dir_parallel(
         };
 
         let path = entry.path();
-        
+
         // Skip hidden files to maintain expected UI tidiness (Optional, but good practice for speed)
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
             if file_name.starts_with('.') && file_name != "." && file_name != ".." {

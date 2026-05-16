@@ -1,0 +1,18 @@
+[package]
+name = "hd-analyzer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hd-analyzer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+crossterm = "0.29"
+hd-analyzer-core = { path = "../hd-analyzer-core" }
+humansize.workspace = true
+ratatui = "0.29"
+rayon.workspace = true
+sysinfo.workspace = true

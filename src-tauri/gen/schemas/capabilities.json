@@ -1,0 +1,1 @@
+{"main":{"identifier":"main","description":"Main window capability for HD Analyzer desktop UI","local":true,"windows":["main"],"permissions":["core:default","macos-permissions:allow-check-full-disk-access-permission","macos-permissions:allow-request-full-disk-access-permission"]}}

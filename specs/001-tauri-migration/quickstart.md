@@ -3,8 +3,7 @@
 ## Prerequisites
 
 - Rust toolchain with Rust 2024 support
-- Node.js package manager for the frontend; use `pnpm` unless the implementation selects another
-  package manager in tasks
+- Node.js and npm for the frontend
 - Tauri v2 development dependencies for the local platform
 
 ## Implementation Setup
@@ -32,17 +31,15 @@ cargo test
 Run frontend checks from `src-web/`:
 
 ```bash
-pnpm install
-pnpm dlx shadcn@latest init
-pnpm dlx shadcn@latest add button card table tabs dialog progress scroll-area badge separator tooltip alert
-pnpm run typecheck
-pnpm run build
+npm install
+npm run typecheck
+npm run build
 ```
 
 Run desktop development smoke test:
 
 ```bash
-cargo tauri dev
+npm run tauri:dev
 ```
 
 ## Manual Desktop Validation
@@ -63,7 +60,7 @@ cargo tauri dev
 After local functionality works, verify the Tauri build command:
 
 ```bash
-cargo tauri build
+npm run tauri:build
 ```
 
 Signing, notarization, app store packaging, and auto-update are out of scope for this feature.

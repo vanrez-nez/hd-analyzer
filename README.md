@@ -22,6 +22,8 @@ HD Analyzer is designed to give you a deep, instantaneous look into your storage
 
 ### Prerequisites
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable version)
+- [Node.js](https://nodejs.org/) and npm for the Tauri desktop frontend
+- Tauri v2 system dependencies for your platform
 
 ### Build from source
 ```bash
@@ -32,14 +34,28 @@ cargo build --release
 
 ## Usage
 
-Run the analyzer:
+Run the terminal analyzer while the desktop migration is in progress:
 ```bash
-./target/release/hd-analyzer
+cargo run -p hd-analyzer-cli
 ```
 
 For full access to system folders (to minimize "Hidden Space"):
 ```bash
-sudo ./target/release/hd-analyzer
+sudo cargo run -p hd-analyzer-cli
+```
+
+Run the Tauri desktop app during development:
+```bash
+npm --prefix src-web install
+npm --prefix src-web run tauri:dev
+```
+
+Validate the workspace:
+```bash
+cargo fmt --check
+cargo test
+npm --prefix src-web run typecheck
+npm --prefix src-web run build
 ```
 
 ### Keybindings

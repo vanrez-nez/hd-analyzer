@@ -29,18 +29,18 @@ of each story.
 **Purpose**: Establish the workspace, Tauri shell, React/shadcn frontend, and temporary CLI wrapper
 structure required by every user story.
 
-- [ ] T001 Convert root package into a Cargo workspace with members for `crates/hd-analyzer-core`, `crates/hd-analyzer-cli`, and `src-tauri` in Cargo.toml
-- [ ] T002 Create `crates/hd-analyzer-core/Cargo.toml` with shared Rust dependencies in crates/hd-analyzer-core/Cargo.toml
-- [ ] T003 Move existing terminal entrypoint package metadata into `crates/hd-analyzer-cli/Cargo.toml`
-- [ ] T004 Move existing terminal files from `src/main.rs`, `src/app.rs`, and `src/ui.rs` into `crates/hd-analyzer-cli/src/main.rs`, `crates/hd-analyzer-cli/src/app.rs`, and `crates/hd-analyzer-cli/src/ui.rs`
-- [ ] T005 Create Tauri backend package files in `src-tauri/Cargo.toml`, `src-tauri/build.rs`, and `src-tauri/tauri.conf.json`
-- [ ] T006 Create conservative main-window capability file in `src-tauri/capabilities/main.json`
-- [ ] T007 Create Vite React TypeScript frontend scaffold in `src-web/package.json`, `src-web/index.html`, `src-web/tsconfig.json`, `src-web/tsconfig.app.json`, `src-web/vite.config.ts`, and `src-web/src/main.tsx`
-- [ ] T008 Configure Tailwind CSS and shadcn/ui base files in `src-web/src/styles.css`, `src-web/components.json`, and `src-web/src/lib/utils.ts`
-- [ ] T009 Add required shadcn/ui component files under `src-web/src/components/ui/` for button, card, table, tabs, dialog, progress, scroll-area, badge, separator, tooltip, and alert
-- [ ] T010 [P] Add frontend command scripts for `dev`, `build`, `typecheck`, and `lint` in `src-web/package.json`
-- [ ] T011 [P] Update project README setup notes for workspace, Tauri, frontend, and validation commands in README.md
-- [ ] T012 [P] Update quickstart command references if implementation scripts differ from the plan in specs/001-tauri-migration/quickstart.md
+- [X] T001 Convert root package into a Cargo workspace with members for `crates/hd-analyzer-core`, `crates/hd-analyzer-cli`, and `src-tauri` in Cargo.toml
+- [X] T002 Create `crates/hd-analyzer-core/Cargo.toml` with shared Rust dependencies in crates/hd-analyzer-core/Cargo.toml
+- [X] T003 Move existing terminal entrypoint package metadata into `crates/hd-analyzer-cli/Cargo.toml`
+- [X] T004 Move existing terminal files from `src/main.rs`, `src/app.rs`, and `src/ui.rs` into `crates/hd-analyzer-cli/src/main.rs`, `crates/hd-analyzer-cli/src/app.rs`, and `crates/hd-analyzer-cli/src/ui.rs`
+- [X] T005 Create Tauri backend package files in `src-tauri/Cargo.toml`, `src-tauri/build.rs`, and `src-tauri/tauri.conf.json`
+- [X] T006 Create conservative main-window capability file in `src-tauri/capabilities/main.json`
+- [X] T007 Create Vite React TypeScript frontend scaffold in `src-web/package.json`, `src-web/index.html`, `src-web/tsconfig.json`, `src-web/tsconfig.app.json`, `src-web/vite.config.ts`, and `src-web/src/main.tsx`
+- [X] T008 Configure Tailwind CSS and shadcn/ui base files in `src-web/src/styles.css`, `src-web/components.json`, and `src-web/src/lib/utils.ts`
+- [X] T009 Add required shadcn/ui component files under `src-web/src/components/ui/` for button, card, table, tabs, dialog, progress, scroll-area, badge, separator, tooltip, and alert
+- [X] T010 [P] Add frontend command scripts for `dev`, `build`, `typecheck`, and `lint` in `src-web/package.json`
+- [X] T011 [P] Update project README setup notes for workspace, Tauri, frontend, and validation commands in README.md
+- [X] T012 [P] Update quickstart command references if implementation scripts differ from the plan in specs/001-tauri-migration/quickstart.md
 
 **Checkpoint**: Workspace structure exists, dependencies are declared, and generated source paths match the implementation plan.
 
@@ -53,28 +53,28 @@ any story-specific UI or command work begins.
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T013 Create public core module layout in `crates/hd-analyzer-core/src/lib.rs`, `crates/hd-analyzer-core/src/drives.rs`, `crates/hd-analyzer-core/src/scan.rs`, `crates/hd-analyzer-core/src/categories.rs`, and `crates/hd-analyzer-core/src/paths.rs`
-- [ ] T014 Move Drive, FileKind, CategoryUsage, ReadError, ScanProgress, ScanResult, and formatting/path helpers from CLI code into `crates/hd-analyzer-core/src/lib.rs` and supporting modules
-- [ ] T015 Move drive discovery and macOS duplicate-volume handling into `crates/hd-analyzer-core/src/drives.rs`
-- [ ] T016 Move file kind detection, executable detection, and category collection into `crates/hd-analyzer-core/src/categories.rs`
-- [ ] T017 Move allocated disk usage, symlink skipping, filesystem-boundary checks, parallel traversal, and progress snapshots into `crates/hd-analyzer-core/src/scan.rs`
-- [ ] T018 Move compact path and ratio/byte formatting helpers into `crates/hd-analyzer-core/src/paths.rs`
-- [ ] T019 Add unit tests for category classification and executable fallback in `crates/hd-analyzer-core/src/categories.rs`
-- [ ] T020 Add unit tests for path compaction and ratio formatting in `crates/hd-analyzer-core/src/paths.rs`
-- [ ] T021 Add unit tests for Drive used-space saturating arithmetic and duplicate mount handling where platform-independent in `crates/hd-analyzer-core/src/drives.rs`
-- [ ] T022 Add scan regression test helpers for temporary directory scanning, symlink skipping, and directory totals in `crates/hd-analyzer-core/src/scan.rs`
+- [X] T013 Create public core module layout in `crates/hd-analyzer-core/src/lib.rs`, `crates/hd-analyzer-core/src/drives.rs`, `crates/hd-analyzer-core/src/scan.rs`, `crates/hd-analyzer-core/src/categories.rs`, and `crates/hd-analyzer-core/src/paths.rs`
+- [X] T014 Move Drive, FileKind, CategoryUsage, ReadError, ScanProgress, ScanResult, and formatting/path helpers from CLI code into `crates/hd-analyzer-core/src/lib.rs` and supporting modules
+- [X] T015 Move drive discovery and macOS duplicate-volume handling into `crates/hd-analyzer-core/src/drives.rs`
+- [X] T016 Move file kind detection, executable detection, and category collection into `crates/hd-analyzer-core/src/categories.rs`
+- [X] T017 Move allocated disk usage, symlink skipping, filesystem-boundary checks, parallel traversal, and progress snapshots into `crates/hd-analyzer-core/src/scan.rs`
+- [X] T018 Move compact path and ratio/byte formatting helpers into `crates/hd-analyzer-core/src/paths.rs`
+- [X] T019 Add unit tests for category classification and executable fallback in `crates/hd-analyzer-core/src/categories.rs`
+- [X] T020 Add unit tests for path compaction and ratio formatting in `crates/hd-analyzer-core/src/paths.rs`
+- [X] T021 Add unit tests for Drive used-space saturating arithmetic and duplicate mount handling where platform-independent in `crates/hd-analyzer-core/src/drives.rs`
+- [X] T022 Add scan regression test helpers for temporary directory scanning, symlink skipping, and directory totals in `crates/hd-analyzer-core/src/scan.rs`
 - [ ] T023 Update CLI wrapper imports to use `hd-analyzer-core` from `crates/hd-analyzer-cli/src/app.rs`
-- [ ] T024 Create Tauri DTO types for DriveDto, ScanSessionDto, ScanProgressDto, ScanResultDto, DirectoryEntryDto, CategoryUsageDto, ReadErrorDto, and error codes in `src-tauri/src/dto.rs`
-- [ ] T025 Create Tauri managed application state for active sessions, scan workers, and result storage in `src-tauri/src/state.rs`
-- [ ] T026 Create Tauri command module skeleton with registered command names from the IPC contract in `src-tauri/src/commands.rs`
-- [ ] T027 Wire Tauri builder, managed state, command registration, and capabilities in `src-tauri/src/lib.rs`
-- [ ] T028 Add DTO mapping tests from core entities to IPC shapes in `src-tauri/src/dto.rs`
-- [ ] T029 Create frontend API wrapper for `invoke`, scan event subscription, and typed DTOs in `src-web/src/api.ts`
-- [ ] T030 Create frontend state model for drives, scan session, result navigation, read errors, and status states in `src-web/src/state.ts`
-- [ ] T031 Create root app shell and view routing placeholders in `src-web/src/App.tsx`
-- [ ] T032 Run `cargo fmt --check` and fix formatting issues in the Rust workspace
-- [ ] T033 Run `cargo test` and fix failing core/DTO/CLI tests before story work proceeds
-- [ ] T034 Run `pnpm install` and `pnpm run typecheck` from `src-web/` after frontend scaffold exists
+- [X] T024 Create Tauri DTO types for DriveDto, ScanSessionDto, ScanProgressDto, ScanResultDto, DirectoryEntryDto, CategoryUsageDto, ReadErrorDto, and error codes in `src-tauri/src/dto.rs`
+- [X] T025 Create Tauri managed application state for active sessions, scan workers, and result storage in `src-tauri/src/state.rs`
+- [X] T026 Create Tauri command module skeleton with registered command names from the IPC contract in `src-tauri/src/commands.rs`
+- [X] T027 Wire Tauri builder, managed state, command registration, and capabilities in `src-tauri/src/lib.rs`
+- [X] T028 Add DTO mapping tests from core entities to IPC shapes in `src-tauri/src/dto.rs`
+- [X] T029 Create frontend API wrapper for `invoke`, scan event subscription, and typed DTOs in `src-web/src/api.ts`
+- [X] T030 Create frontend state model for drives, scan session, result navigation, read errors, and status states in `src-web/src/state.ts`
+- [X] T031 Create root app shell and view routing placeholders in `src-web/src/App.tsx`
+- [X] T032 Run `cargo fmt --check` and fix formatting issues in the Rust workspace
+- [X] T033 Run `cargo test` and fix failing core/DTO/CLI tests before story work proceeds
+- [X] T034 Run `npm install` and `npm run typecheck` from `src-web/` after frontend scaffold exists
 
 **Checkpoint**: Core scan behavior is reusable and tested, Tauri command/state boundaries compile, and frontend state/API types exist.
 
@@ -96,12 +96,12 @@ using terminal controls.
 
 ### Implementation for User Story 1
 
-- [ ] T038 [US1] Implement `list_drives` Tauri command using `hd-analyzer-core` drive discovery in `src-tauri/src/commands.rs`
-- [ ] T039 [US1] Implement DriveSelection view with shadcn card/table rows, badges, alert empty/error state, and scan action in `src-web/src/views/DriveSelection.tsx`
-- [ ] T040 [US1] Integrate DriveSelection into the root app shell and initial loading/error states in `src-web/src/App.tsx`
-- [ ] T041 [US1] Add drive selection actions and selected-drive state transitions in `src-web/src/state.ts`
-- [ ] T042 [US1] Add Tauri window metadata, title, and dev/build frontend paths in `src-tauri/tauri.conf.json`
-- [ ] T043 [US1] Validate MVP with `pnpm run typecheck` from `src-web/` and `cargo test`
+- [X] T038 [US1] Implement `list_drives` Tauri command using `hd-analyzer-core` drive discovery in `src-tauri/src/commands.rs`
+- [X] T039 [US1] Implement DriveSelection view with shadcn card/table rows, badges, alert empty/error state, and scan action in `src-web/src/views/DriveSelection.tsx`
+- [X] T040 [US1] Integrate DriveSelection into the root app shell and initial loading/error states in `src-web/src/App.tsx`
+- [X] T041 [US1] Add drive selection actions and selected-drive state transitions in `src-web/src/state.ts`
+- [X] T042 [US1] Add Tauri window metadata, title, and dev/build frontend paths in `src-tauri/tauri.conf.json`
+- [X] T043 [US1] Validate MVP with `npm run typecheck` from `src-web/` and `cargo test`
 - [ ] T044 [US1] Run `cargo tauri dev` and manually confirm drive list, empty/error behavior, keyboard focus, and app quit flow
 
 **Checkpoint**: User Story 1 is functional and independently demoable as the MVP.
@@ -126,15 +126,15 @@ one directory, return to its parent, and rescan a focused folder.
 ### Implementation for User Story 2
 
 - [ ] T049 [US2] Implement scan session creation, active-scan guard, worker launch, progress emission, and final result storage in `src-tauri/src/commands.rs`
-- [ ] T050 [US2] Implement `list_directory_entries` with root-boundary validation and sorted directory rows in `src-tauri/src/commands.rs`
+- [X] T050 [US2] Implement `list_directory_entries` with root-boundary validation and sorted directory rows in `src-tauri/src/commands.rs`
 - [ ] T051 [US2] Implement `rescan_subtree` with partial-result merge and focused-path preservation in `src-tauri/src/commands.rs`
-- [ ] T052 [US2] Add optional cancellation support or explicitly omit `cancel_scan` registration per contract in `src-tauri/src/commands.rs`
+- [X] T052 [US2] Add optional cancellation support or explicitly omit `cancel_scan` registration per contract in `src-tauri/src/commands.rs`
 - [ ] T053 [US2] Implement scan progress subscription and stale-session filtering in `src-web/src/api.ts`
 - [ ] T054 [US2] Implement scan session reducer/actions for scanning, complete, failed, and partial-rescan states in `src-web/src/state.ts`
 - [ ] T055 [US2] Implement ScanExplorer view with shadcn table, progress, cards, tabs, badges, tooltips, and navigation/rescan controls in `src-web/src/views/ScanExplorer.tsx`
 - [ ] T056 [US2] Implement category distribution panel with stable layout and category shares in `src-web/src/views/ScanExplorer.tsx`
-- [ ] T057 [US2] Integrate drive-to-scan and scan-to-explorer transitions in `src-web/src/App.tsx`
-- [ ] T058 [US2] Validate with `cargo test`, `pnpm run typecheck`, and `pnpm run build`
+- [X] T057 [US2] Integrate drive-to-scan and scan-to-explorer transitions in `src-web/src/App.tsx`
+- [ ] T058 [US2] Validate with `cargo test`, `npm run typecheck`, and `npm run build`
 - [ ] T059 [US2] Run `cargo tauri dev` and manually confirm progress responsiveness, directory navigation, parent navigation, and focused subtree rescan
 
 **Checkpoint**: User Story 2 works independently after US1 and preserves responsive scan behavior.
@@ -296,9 +296,9 @@ Task: "T073 [US4] Add manual UI consistency and keyboard-focus validation steps 
 
 ### Validation Gates
 
-1. After Phase 2: `cargo fmt --check`, `cargo test`, and `pnpm run typecheck`.
+1. After Phase 2: `cargo fmt --check`, `cargo test`, and `npm run typecheck`.
 2. After each user story: story-specific manual validation from quickstart.
-3. Before completion: `cargo test`, `pnpm run build`, `cargo tauri dev` smoke test, and `cargo tauri build`.
+3. Before completion: `cargo test`, `npm run build`, `npm run tauri:dev` smoke test, and `npm run tauri:build`.
 
 ## Notes
 

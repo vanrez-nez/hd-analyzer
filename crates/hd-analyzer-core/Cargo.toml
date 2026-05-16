@@ -1,0 +1,15 @@
+[package]
+name = "hd-analyzer-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+humansize.workspace = true
+rayon.workspace = true
+serde.workspace = true
+sysinfo.workspace = true
+
+[dev-dependencies]
+tempfile = "3.10"
