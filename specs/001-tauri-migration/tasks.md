@@ -20,19 +20,19 @@ of each story.
 
 ## Path Conventions
 
-- **Rust workspace**: `Cargo.toml`, `crates/hd-analyzer-core/`, `crates/hd-analyzer-cli/`, `src-tauri/`
+- **Rust workspace**: `Cargo.toml`, `crates/hd-analyzer-core/`, `src-tauri/`
 - **Frontend**: `src-web/`
 - **Contracts and validation docs**: `specs/001-tauri-migration/`
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-**Purpose**: Establish the workspace, Tauri shell, React/shadcn frontend, and temporary CLI wrapper
-structure required by every user story.
+**Purpose**: Establish the workspace, Tauri shell, and React/shadcn frontend structure required by
+every user story.
 
-- [X] T001 Convert root package into a Cargo workspace with members for `crates/hd-analyzer-core`, `crates/hd-analyzer-cli`, and `src-tauri` in Cargo.toml
+- [X] T001 Convert root package into a Cargo workspace with members for `crates/hd-analyzer-core` and `src-tauri` in Cargo.toml
 - [X] T002 Create `crates/hd-analyzer-core/Cargo.toml` with shared Rust dependencies in crates/hd-analyzer-core/Cargo.toml
-- [X] T003 Move existing terminal entrypoint package metadata into `crates/hd-analyzer-cli/Cargo.toml`
-- [X] T004 Move existing terminal files from `src/main.rs`, `src/app.rs`, and `src/ui.rs` into `crates/hd-analyzer-cli/src/main.rs`, `crates/hd-analyzer-cli/src/app.rs`, and `crates/hd-analyzer-cli/src/ui.rs`
+- [X] T003 Remove terminal app package metadata from the workspace
+- [X] T004 Remove terminal app source files so the Tauri desktop app is the only supported product surface
 - [X] T005 Create Tauri backend package files in `src-tauri/Cargo.toml`, `src-tauri/build.rs`, and `src-tauri/tauri.conf.json`
 - [X] T006 Create conservative main-window capability file in `src-tauri/capabilities/main.json`
 - [X] T007 Create Vite React TypeScript frontend scaffold in `src-web/package.json`, `src-web/index.html`, `src-web/tsconfig.json`, `src-web/tsconfig.app.json`, `src-web/vite.config.ts`, and `src-web/src/main.tsx`
@@ -42,7 +42,7 @@ structure required by every user story.
 - [X] T011 [P] Update project README setup notes for workspace, Tauri, frontend, and validation commands in README.md
 - [X] T012 [P] Update quickstart command references if implementation scripts differ from the plan in specs/001-tauri-migration/quickstart.md
 
-**Checkpoint**: Workspace structure exists, dependencies are declared, and generated source paths match the implementation plan.
+**Checkpoint**: Workspace structure exists, dependencies are declared, generated source paths match the implementation plan, and no terminal app wrapper is retained.
 
 ---
 
@@ -63,7 +63,7 @@ any story-specific UI or command work begins.
 - [X] T020 Add unit tests for path compaction and ratio formatting in `crates/hd-analyzer-core/src/paths.rs`
 - [X] T021 Add unit tests for Drive used-space saturating arithmetic and duplicate mount handling where platform-independent in `crates/hd-analyzer-core/src/drives.rs`
 - [X] T022 Add scan regression test helpers for temporary directory scanning, symlink skipping, and directory totals in `crates/hd-analyzer-core/src/scan.rs`
-- [ ] T023 Update CLI wrapper imports to use `hd-analyzer-core` from `crates/hd-analyzer-cli/src/app.rs`
+- [X] T023 Remove deferred CLI wrapper task because terminal app support is no longer retained
 - [X] T024 Create Tauri DTO types for DriveDto, ScanSessionDto, ScanProgressDto, ScanResultDto, DirectoryEntryDto, CategoryUsageDto, ReadErrorDto, and error codes in `src-tauri/src/dto.rs`
 - [X] T025 Create Tauri managed application state for active sessions, scan workers, and result storage in `src-tauri/src/state.rs`
 - [X] T026 Create Tauri command module skeleton with registered command names from the IPC contract in `src-tauri/src/commands.rs`
@@ -73,7 +73,7 @@ any story-specific UI or command work begins.
 - [X] T030 Create frontend state model for drives, scan session, result navigation, read errors, and status states in `src-web/src/state.ts`
 - [X] T031 Create root app shell and view routing placeholders in `src-web/src/App.tsx`
 - [X] T032 Run `cargo fmt --check` and fix formatting issues in the Rust workspace
-- [X] T033 Run `cargo test` and fix failing core/DTO/CLI tests before story work proceeds
+- [X] T033 Run `cargo test` and fix failing core/DTO tests before story work proceeds
 - [X] T034 Run `npm install` and `npm run typecheck` from `src-web/` after frontend scaffold exists
 
 **Checkpoint**: Core scan behavior is reusable and tested, Tauri command/state boundaries compile, and frontend state/API types exist.
@@ -306,4 +306,4 @@ Task: "T073 [US4] Add manual UI consistency and keyboard-focus validation steps 
 - Story labels map to user stories in `specs/001-tauri-migration/spec.md`.
 - Do not expose broad frontend filesystem permissions; Rust commands own scanning behavior.
 - If `cancel_scan` is deferred, omit it from Tauri registration and hide cancel UI per `contracts/tauri-ipc.md`.
-- Preserve existing CLI/TUI behavior until the desktop path is validated, then decide separately whether to remove it.
+- Terminal app support is removed; the Tauri desktop app is the supported product surface.

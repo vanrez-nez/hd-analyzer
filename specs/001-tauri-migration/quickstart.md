@@ -31,15 +31,15 @@ cargo test
 Run frontend checks from `src-web/`:
 
 ```bash
-npm install
-npm run typecheck
-npm run build
+npm --prefix src-web install
+npm --prefix src-web run typecheck
+npm --prefix src-web run build
 ```
 
-Run desktop development smoke test:
+Run the desktop development smoke test from the repository root:
 
 ```bash
-npm run tauri:dev
+npm --prefix src-web run tauri:dev
 ```
 
 ## Manual Desktop Validation
@@ -60,7 +60,7 @@ npm run tauri:dev
 After local functionality works, verify the Tauri build command:
 
 ```bash
-npm run tauri:build
+npm --prefix src-web run tauri:build
 ```
 
 Signing, notarization, app store packaging, and auto-update are out of scope for this feature.

@@ -91,12 +91,6 @@ crates/
 │       ├── drives.rs    # Drive discovery and platform filtering
 │       ├── categories.rs
 │       └── paths.rs
-├── hd-analyzer-cli/     # Optional temporary compatibility wrapper during migration
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs
-│       ├── app.rs
-│       └── ui.rs
 src-tauri/
 ├── Cargo.toml
 ├── build.rs
@@ -132,17 +126,17 @@ tests/
 └── core_regression.rs   # Integration tests when unit tests are insufficient
 ```
 
-**Structure Decision**: Use a Rust workspace so the scanner is reusable by both the Tauri backend
-and any temporary CLI/TUI wrapper. Put Tauri-specific code in `src-tauri/` and a Vite React +
-shadcn/ui frontend in `src-web/`, matching Tauri's manual setup model for an existing project and
-shadcn/ui's Vite setup.
+**Structure Decision**: Use a Rust workspace so the scanner is reusable by the Tauri backend while
+the desktop app remains the only supported product surface. Put Tauri-specific code in `src-tauri/`
+and a Vite React + shadcn/ui frontend in `src-web/`, matching Tauri's manual setup model for an
+existing project and shadcn/ui's Vite setup.
 
 ## Complexity Tracking
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Terminal UX Is the Product | The requested feature changes HD Analyzer from TUI-first to Tauri desktop-first. | Keeping the Ratatui UI as the primary surface would not satisfy "use tauri instead of a cli backend". |
-| Workspace split into core, optional CLI, and Tauri app | Separates scanner behavior from desktop shell and keeps deterministic logic testable. | Directly embedding current `src/app.rs` into `src-tauri` would couple UI state, scanner state, and IPC, making progress streaming and regression tests harder. |
+| Terminal UX Is the Product | The requested feature changes HD Analyzer from terminal-first to Tauri desktop-first. | Keeping the terminal UI as the primary surface would not satisfy "use tauri instead of a cli backend". |
+| Workspace split into core and Tauri app | Separates scanner behavior from desktop shell and keeps deterministic logic testable. | Directly embedding current scanner logic into `src-tauri` would couple scanner state and IPC, making progress streaming and regression tests harder. |
 | React frontend added for shadcn/ui | shadcn/ui's official Vite setup targets React + TypeScript and generated component files. | Staying with vanilla TypeScript would not satisfy the requested component system. |
 
 ## Phase 0 Research Summary

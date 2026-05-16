@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "crates/hd-analyzer-cli",
     "crates/hd-analyzer-core",
     "src-tauri",
 ]
