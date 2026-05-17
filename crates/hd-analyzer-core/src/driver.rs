@@ -76,6 +76,37 @@ pub struct ScanIssue {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteSafetyClassification {
+    UserContent,
+    SafeJunk,
+    ReviewRequired,
+    ProtectedSystem,
+    NotDeletableNow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteSafetyFlag {
+    SystemOwned,
+    SipProtected,
+    Immutable,
+    AppendOnly,
+    ParentNotWritable,
+    NotDeletableNow,
+    SafeJunkRule,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathDeleteSafety {
+    pub classification: DeleteSafetyClassification,
+    pub can_delete_now: bool,
+    pub flags: Vec<DeleteSafetyFlag>,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Volume {
@@ -123,6 +154,7 @@ pub struct PathNode {
     pub visible: bool,
     pub children_known: bool,
     pub active_job_id: Option<String>,
+    pub delete_safety: PathDeleteSafety,
     pub issues: Vec<ScanIssue>,
 }
 

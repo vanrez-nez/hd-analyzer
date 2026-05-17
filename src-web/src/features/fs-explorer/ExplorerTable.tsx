@@ -4,7 +4,7 @@ import { ArrowDownIcon, ArrowUpIcon, FileIcon, Folder, HardDrive } from "lucide-
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import type { DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
+import type { DeleteSafetyClassification, DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
 
 const NAME_MAX_LENGTH = 64
 
@@ -70,8 +70,12 @@ export function ExplorerTable({
               ))
             : (rows as PathNodeDto[]).map((node) => (
                 <TableRow
-                  className={node.kind === "directory" ? "cursor-pointer select-none" : "select-none"}
+                  className={cn(
+                    node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
+                    node.kind === "directory" ? safetyRowClass(node.deleteSafety?.classification) : undefined,
+                  )}
                   key={node.path}
+                  title={node.deleteSafety?.reason}
                   onClick={() => {
                     if (node.kind === "directory") onOpenNode(node)
                   }}
@@ -79,11 +83,16 @@ export function ExplorerTable({
                   <TableCell>
                     <span className="flex min-w-0 items-center gap-2">
                       {node.kind === "directory" ? (
-                        <Folder data-icon="inline-start" className="size-3.5" />
+                        <Folder
+                          data-icon="inline-start"
+                          className={cn("size-3.5", safetyIconClass(node.deleteSafety?.classification))}
+                        />
                       ) : (
                         <FileIcon data-icon="inline-start" className="size-3.5 opacity-50" />
                       )}
-                      <span title={node.name}>{truncateMiddle(node.name, NAME_MAX_LENGTH)}</span>
+                      <span title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}>
+                        {truncateMiddle(node.name, NAME_MAX_LENGTH)}
+                      </span>
                     </span>
                   </TableCell>
                   <TableCell>{renderNodeSize(node, loadingPath)}</TableCell>
@@ -93,6 +102,38 @@ export function ExplorerTable({
       </Table>
     </div>
   )
+}
+
+function safetyRowClass(classification?: DeleteSafetyClassification) {
+  switch (classification) {
+    case "protected_system":
+      return "bg-destructive/10 hover:bg-destructive/15"
+    case "not_deletable_now":
+      return "bg-chart-1/10 hover:bg-chart-1/15"
+    case "review_required":
+      return "bg-muted/60 hover:bg-muted/70"
+    case "safe_junk":
+      return "bg-chart-2/10 hover:bg-chart-2/15"
+    case "user_content":
+    default:
+      return undefined
+  }
+}
+
+function safetyIconClass(classification?: DeleteSafetyClassification) {
+  switch (classification) {
+    case "protected_system":
+      return "text-destructive"
+    case "not_deletable_now":
+      return "text-chart-1"
+    case "review_required":
+      return "text-muted-foreground"
+    case "safe_junk":
+      return "text-chart-2"
+    case "user_content":
+    default:
+      return undefined
+  }
 }
 
 type SortableHeadProps = {

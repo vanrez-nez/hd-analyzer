@@ -36,6 +36,29 @@ export type ScanIssueDto = {
   message: string
 }
 
+export type DeleteSafetyClassification =
+  | "user_content"
+  | "safe_junk"
+  | "review_required"
+  | "protected_system"
+  | "not_deletable_now"
+
+export type DeleteSafetyFlag =
+  | "system_owned"
+  | "sip_protected"
+  | "immutable"
+  | "append_only"
+  | "parent_not_writable"
+  | "not_deletable_now"
+  | "safe_junk_rule"
+
+export type PathDeleteSafetyDto = {
+  classification: DeleteSafetyClassification
+  canDeleteNow: boolean
+  flags: DeleteSafetyFlag[]
+  reason: string
+}
+
 export type PathNodeDto = {
   path: string
   name: string
@@ -48,6 +71,7 @@ export type PathNodeDto = {
   visible: boolean
   childrenKnown: boolean
   activeJobId?: string | null
+  deleteSafety?: PathDeleteSafetyDto
   issues: ScanIssueDto[]
 }
 

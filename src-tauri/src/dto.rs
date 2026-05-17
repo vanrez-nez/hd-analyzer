@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use hd_analyzer_core::{
-    CategoryUsage, DirectoryListing, Drive, DriverEvent, EntryKind, FileKind, InvalidationReceipt,
-    InvalidationScope, NodeState, PathNode, ProgressSnapshot, ReadError, ScanConfig, ScanIssue,
-    ScanProgress, ScanResult, StartScanReceipt, Volume, paths,
+    CategoryUsage, DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, Drive,
+    DriverEvent, EntryKind, FileKind, InvalidationReceipt, InvalidationScope, NodeState,
+    PathDeleteSafety, PathNode, ProgressSnapshot, ReadError, ScanConfig, ScanIssue, ScanProgress,
+    ScanResult, StartScanReceipt, Volume, paths,
 };
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +114,26 @@ impl From<&ScanIssue> for ScanIssueDto {
     }
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PathDeleteSafetyDto {
+    pub classification: DeleteSafetyClassification,
+    pub can_delete_now: bool,
+    pub flags: Vec<DeleteSafetyFlag>,
+    pub reason: String,
+}
+
+impl From<&PathDeleteSafety> for PathDeleteSafetyDto {
+    fn from(safety: &PathDeleteSafety) -> Self {
+        Self {
+            classification: safety.classification,
+            can_delete_now: safety.can_delete_now,
+            flags: safety.flags.clone(),
+            reason: safety.reason.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PathNodeDto {
@@ -127,6 +148,7 @@ pub struct PathNodeDto {
     pub visible: bool,
     pub children_known: bool,
     pub active_job_id: Option<String>,
+    pub delete_safety: PathDeleteSafetyDto,
     pub issues: Vec<ScanIssueDto>,
 }
 
@@ -144,6 +166,7 @@ impl From<&PathNode> for PathNodeDto {
             visible: node.visible,
             children_known: node.children_known,
             active_job_id: node.active_job_id.clone(),
+            delete_safety: PathDeleteSafetyDto::from(&node.delete_safety),
             issues: node.issues.iter().map(ScanIssueDto::from).collect(),
         }
     }

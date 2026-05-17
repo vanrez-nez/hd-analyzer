@@ -15,6 +15,7 @@ use crate::driver::{
     ReadIssueKind, ScanIssue,
 };
 use crate::rules::ScanConfig;
+use crate::safety::classify_path_safety;
 use crate::size::{HardLinkDedupe, directory_measurement};
 use crate::{FileKind, ReadError, ScanProgress, ScanResult};
 
@@ -362,7 +363,7 @@ fn discover_directory_inner(
                         total_visible_size =
                             total_visible_size.saturating_add(measurement.allocated_bytes);
                         children.push(PathNode {
-                            path: entry_path,
+                            path: entry_path.clone(),
                             name,
                             kind: EntryKind::File,
                             parent_path: Some(path.to_path_buf()),
@@ -373,6 +374,7 @@ fn discover_directory_inner(
                             visible: true,
                             children_known: true,
                             active_job_id: None,
+                            delete_safety: classify_path_safety(&entry_path),
                             issues: Vec::new(),
                         });
                     }
@@ -427,6 +429,7 @@ fn discover_directory_inner(
                     visible: true,
                     children_known,
                     active_job_id: None,
+                    delete_safety: classify_path_safety(&entry_path),
                     issues: node_issues,
                 });
             }
@@ -446,7 +449,7 @@ fn discover_directory_inner(
                         total_visible_size =
                             total_visible_size.saturating_add(measurement.allocated_bytes);
                         children.push(PathNode {
-                            path: entry_path,
+                            path: entry_path.clone(),
                             name,
                             kind: EntryKind::File,
                             parent_path: Some(path.to_path_buf()),
@@ -457,6 +460,7 @@ fn discover_directory_inner(
                             visible: true,
                             children_known: true,
                             active_job_id: None,
+                            delete_safety: classify_path_safety(&entry_path),
                             issues: Vec::new(),
                         });
                     }
@@ -594,7 +598,7 @@ fn discover_directory_precise_inner(
                         total_visible_size =
                             total_visible_size.saturating_add(measurement.allocated_bytes);
                         children.push(PathNode {
-                            path: entry_path,
+                            path: entry_path.clone(),
                             name,
                             kind: EntryKind::File,
                             parent_path: Some(path.to_path_buf()),
@@ -605,6 +609,7 @@ fn discover_directory_precise_inner(
                             visible: true,
                             children_known: true,
                             active_job_id: None,
+                            delete_safety: classify_path_safety(&entry_path),
                             issues: Vec::new(),
                         });
                     }
@@ -652,6 +657,7 @@ fn discover_directory_precise_inner(
                     visible: true,
                     children_known: !measurement.has_visible_children,
                     active_job_id: None,
+                    delete_safety: classify_path_safety(&entry_path),
                     issues: measurement.issues,
                 });
             }
@@ -671,7 +677,7 @@ fn discover_directory_precise_inner(
                         total_visible_size =
                             total_visible_size.saturating_add(measurement.allocated_bytes);
                         children.push(PathNode {
-                            path: entry_path,
+                            path: entry_path.clone(),
                             name,
                             kind: EntryKind::File,
                             parent_path: Some(path.to_path_buf()),
@@ -682,6 +688,7 @@ fn discover_directory_precise_inner(
                             visible: true,
                             children_known: true,
                             active_job_id: None,
+                            delete_safety: classify_path_safety(&entry_path),
                             issues: Vec::new(),
                         });
                     }

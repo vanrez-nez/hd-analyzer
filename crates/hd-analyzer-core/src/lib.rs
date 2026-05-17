@@ -5,6 +5,7 @@ pub mod drives;
 pub mod jobs;
 pub mod paths;
 pub mod rules;
+pub mod safety;
 pub mod scan;
 pub mod size;
 
@@ -14,9 +15,10 @@ use std::time::{Duration, Instant};
 
 pub use categories::{collect_categories, detect_file_kind};
 pub use driver::{
-    DirectoryListing, DriverError, DriverEvent, DriverResult, EntryKind, HdDriver,
-    InvalidationReceipt, InvalidationScope, LocalHdDriver, NodeState, OpenPathRequest, PathNode,
-    ReadIssueKind, ScanIssue, StartScanReceipt, StartScanRequest, Volume,
+    DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, DriverError, DriverEvent,
+    DriverResult, EntryKind, HdDriver, InvalidationReceipt, InvalidationScope, LocalHdDriver,
+    NodeState, OpenPathRequest, PathDeleteSafety, PathNode, ReadIssueKind, ScanIssue,
+    StartScanReceipt, StartScanRequest, Volume,
 };
 pub use drives::{Drive, list_drives};
 pub use jobs::{JobState, ProgressSnapshot};

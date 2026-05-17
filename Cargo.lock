@@ -1413,6 +1413,7 @@ dependencies = [
  "humansize",
  "jwalk",
  "nix",
+ "objc2-foundation",
  "rayon",
  "serde",
  "sysinfo",
