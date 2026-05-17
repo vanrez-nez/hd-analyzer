@@ -1,8 +1,19 @@
-import { HardDrive, Folder, FileIcon } from "lucide-react"
+import { useMemo, useState } from "react"
+import { ArrowDownIcon, ArrowUpIcon, FileIcon, Folder, HardDrive } from "lucide-react"
 
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import type { DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
+
+const NAME_MAX_LENGTH = 64
+
+type SortColumn = "name" | "size"
+type SortDirection = "asc" | "desc"
+type SortState = {
+  column: SortColumn
+  direction: SortDirection
+}
 
 type ExplorerTableProps = {
   volumes: DriveDto[]
@@ -19,37 +30,47 @@ export function ExplorerTable({
   onOpenVolume,
   onOpenNode,
 }: ExplorerTableProps) {
-  const rows = listing?.children ?? []
+  const [sort, setSort] = useState<SortState>({ column: "size", direction: "desc" })
+  const rows = useMemo(() => {
+    return listing ? sortNodes(listing.children, sort) : sortVolumes(volumes, sort)
+  }, [listing, sort, volumes])
+
+  const toggleSort = (column: SortColumn) => {
+    setSort((current) => ({
+      column,
+      direction: current.column === column && current.direction === "desc" ? "asc" : "desc",
+    }))
+  }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+    <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead className="w-28">Kind</TableHead>
-            <TableHead className="w-36 text-right">Size</TableHead>
-            <TableHead className="w-32">State</TableHead>
+            <SortableHead column="name" sort={sort} onSort={toggleSort}>
+              Name
+            </SortableHead>
+            <SortableHead column="size" sort={sort} onSort={toggleSort} className="w-36">
+              Size
+            </SortableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {!listing
-            ? volumes.map((volume) => (
-                <TableRow className="cursor-pointer" key={volume.id} onClick={() => onOpenVolume(volume)}>
+            ? (rows as DriveDto[]).map((volume) => (
+                <TableRow className="cursor-pointer select-none" key={volume.id} onClick={() => onOpenVolume(volume)}>
                   <TableCell>
                     <span className="flex min-w-0 items-center gap-2">
                       <HardDrive data-icon="inline-start" />
-                      <span className="truncate">{volume.label}</span>
+                      <span title={volume.label}>{truncateMiddle(volume.label, NAME_MAX_LENGTH)}</span>
                     </span>
                   </TableCell>
-                  <TableCell>volume</TableCell>
-                  <TableCell className="text-right">{formatBytes(volume.usedSpace)}</TableCell>
-                  <TableCell>{volume.fileSystem || "ready"}</TableCell>
+                  <TableCell>{formatBytes(volume.usedSpace)}</TableCell>
                 </TableRow>
               ))
-            : rows.map((node) => (
+            : (rows as PathNodeDto[]).map((node) => (
                 <TableRow
-                  className={node.kind === "directory" ? "cursor-pointer" : undefined}
+                  className={node.kind === "directory" ? "cursor-pointer select-none" : "select-none"}
                   key={node.path}
                   onClick={() => {
                     if (node.kind === "directory") onOpenNode(node)
@@ -58,17 +79,10 @@ export function ExplorerTable({
                   <TableCell>
                     <span className="flex min-w-0 items-center gap-2">
                       {node.kind === "directory" ? <Folder data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
-                      <span className="truncate">{node.name}</span>
+                      <span title={node.name}>{truncateMiddle(node.name, NAME_MAX_LENGTH)}</span>
                     </span>
                   </TableCell>
-                  <TableCell>{node.kind}</TableCell>
-                  <TableCell className="text-right">{formatNodeSize(node)}</TableCell>
-                  <TableCell>
-                    <span className="flex items-center gap-2">
-                      {isWorking(node.state) || loadingPath === node.path ? <Spinner /> : null}
-                      <span>{node.state}</span>
-                    </span>
-                  </TableCell>
+                  <TableCell>{renderNodeSize(node, loadingPath)}</TableCell>
                 </TableRow>
               ))}
         </TableBody>
@@ -77,13 +91,124 @@ export function ExplorerTable({
   )
 }
 
+type SortableHeadProps = {
+  children: string
+  className?: string
+  column: SortColumn
+  onSort: (column: SortColumn) => void
+  sort: SortState
+}
+
+function SortableHead({ children, className, column, onSort, sort }: SortableHeadProps) {
+  const active = sort.column === column
+  const Icon = sort.direction === "asc" ? ArrowUpIcon : ArrowDownIcon
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTableCellElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault()
+      onSort(column)
+    }
+  }
+
+  return (
+    <TableHead
+      aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+      className={cn(
+        "sticky top-0 z-10 cursor-pointer select-none bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        className,
+      )}
+      onClick={() => onSort(column)}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+    >
+      <span className="inline-flex h-8 items-center gap-1.5 rounded-md">
+        {children}
+        {active ? <Icon data-icon="inline-end" className="size-3" /> : null}
+      </span>
+    </TableHead>
+  )
+}
+
 function isWorking(state: string) {
   return state === "queued" || state === "working" || state === "partial" || state === "stale"
 }
 
-function formatNodeSize(node: PathNodeDto) {
+function sortVolumes(volumes: DriveDto[], sort: SortState) {
+  return [...volumes].sort((left, right) => compareValues(volumeSortValue(left, sort.column), volumeSortValue(right, sort.column), sort))
+}
+
+function sortNodes(nodes: PathNodeDto[], sort: SortState) {
+  return [...nodes].sort((left, right) => compareValues(nodeSortValue(left, sort.column), nodeSortValue(right, sort.column), sort))
+}
+
+function volumeSortValue(volume: DriveDto, column: SortColumn) {
+  switch (column) {
+    case "size":
+      return { complete: true, value: volume.usedSpace }
+    case "name":
+      return volume.label
+  }
+}
+
+function nodeSortValue(node: PathNodeDto, column: SortColumn) {
+  switch (column) {
+    case "size":
+      return { complete: node.state === "complete", value: node.size }
+    case "name":
+      return node.name
+  }
+}
+
+function compareValues(left: string | { complete: boolean; value: number }, right: string | { complete: boolean; value: number }, sort: SortState) {
+  const result = typeof left === "string" && typeof right === "string" ? compareText(left, right) : compareSizeValues(left, right)
+  return sort.direction === "asc" ? result : -result
+}
+
+function compareText(left: string, right: string) {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })
+}
+
+function compareSizeValues(
+  left: string | { complete: boolean; value: number },
+  right: string | { complete: boolean; value: number },
+) {
+  if (typeof left === "string" || typeof right === "string") {
+    return compareText(String(left), String(right))
+  }
+
+  if (left.complete !== right.complete) {
+    return left.complete ? 1 : -1
+  }
+
+  return left.value - right.value
+}
+
+function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
+  if (isWorking(node.state) || loadingPath === node.path) {
+    return (
+      <span className="inline-flex">
+        <Spinner />
+      </span>
+    )
+  }
+
   if (node.state !== "complete") return ""
   return formatBytes(node.size)
+}
+
+function truncateMiddle(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  if (maxLength <= 3) {
+    return value.slice(0, Math.max(0, maxLength))
+  }
+
+  const available = maxLength - 3
+  const headLength = Math.ceil(available / 2)
+  const tailLength = Math.floor(available / 2)
+  return `${value.slice(0, headLength)}...${value.slice(value.length - tailLength)}`
 }
 
 function formatBytes(bytes: number) {

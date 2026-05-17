@@ -7,14 +7,18 @@ type PathButtonGroupProps = {
   path?: string
   rootPath?: string
   rootLabel?: string
+  labelMaxLength?: number
   onNavigate: (path: string) => void
   onBackToRoot: () => void
 }
+
+const DEFAULT_LABEL_MAX_LENGTH = 45
 
 export function PathButtonGroup({
   path,
   rootPath,
   rootLabel,
+  labelMaxLength = DEFAULT_LABEL_MAX_LENGTH,
   onNavigate,
   onBackToRoot,
 }: PathButtonGroupProps) {
@@ -50,11 +54,12 @@ export function PathButtonGroup({
             type="button"
             variant="outline"
             size="sm"
-            className="min-w-0 max-w-48 truncate"
+            className="min-w-0 max-w-none"
             key={part.path}
+            title={part.label}
             onClick={() => onNavigate(part.path)}
           >
-            {part.label}
+            {truncateMiddle(part.label, labelMaxLength)}
           </Button>
         ))}
       </ButtonGroup>
@@ -104,6 +109,21 @@ export function getBackPath(path: string, rootPath: string) {
 
   const parentPath = rawParts.slice(0, -1).join("/")
   return normalizedRoot === "/" ? `/${parentPath}` : `${normalizedRoot}/${parentPath}`
+}
+
+export function truncateMiddle(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  if (maxLength <= 3) {
+    return value.slice(0, Math.max(0, maxLength))
+  }
+
+  const available = maxLength - 3
+  const headLength = Math.ceil(available / 2)
+  const tailLength = Math.floor(available / 2)
+  return `${value.slice(0, headLength)}...${value.slice(value.length - tailLength)}`
 }
 
 function normalizePath(path: string) {
