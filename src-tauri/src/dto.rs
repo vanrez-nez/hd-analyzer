@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use hd_analyzer_core::{
-    CategoryUsage, Drive, FileKind, ReadError, ScanProgress, ScanResult, paths,
+    CategoryUsage, DirectoryListing, Drive, DriverEvent, EntryKind, FileKind, InvalidationReceipt,
+    InvalidationScope, NodeState, PathNode, ProgressSnapshot, ReadError, ScanConfig, ScanIssue,
+    ScanProgress, ScanResult, StartScanReceipt, Volume, paths,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +31,315 @@ impl From<&Drive> for DriveDto {
             available_space: drive.available_space,
             used_space: drive.used_space(),
             file_system: drive.file_system.clone(),
+        }
+    }
+}
+
+impl From<&Volume> for DriveDto {
+    fn from(volume: &Volume) -> Self {
+        Self {
+            id: volume.id.clone(),
+            label: volume.display_name.clone(),
+            mount_point: volume.mount_point.display().to_string(),
+            total_space: volume.total_bytes,
+            available_space: volume.available_bytes,
+            used_space: volume.total_bytes.saturating_sub(volume.available_bytes),
+            file_system: volume.filesystem.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanConfigDto {
+    pub requested_depth: Option<usize>,
+    pub preload_depth: Option<usize>,
+    pub show_hidden: Option<bool>,
+    pub expand_above_bytes: Option<u64>,
+    pub min_visible_folder_bytes: Option<u64>,
+    pub stay_on_filesystem: Option<bool>,
+    pub follow_symlinks: Option<bool>,
+}
+
+impl From<ScanConfigDto> for ScanConfig {
+    fn from(dto: ScanConfigDto) -> Self {
+        let default = ScanConfig::default();
+        ScanConfig {
+            requested_depth: dto.requested_depth.unwrap_or(default.requested_depth),
+            preload_depth: dto.preload_depth.unwrap_or(default.preload_depth),
+            show_hidden: dto.show_hidden.unwrap_or(default.show_hidden),
+            expand_above_bytes: dto.expand_above_bytes.or(default.expand_above_bytes),
+            min_visible_folder_bytes: dto
+                .min_visible_folder_bytes
+                .or(default.min_visible_folder_bytes),
+            stay_on_filesystem: dto.stay_on_filesystem.unwrap_or(default.stay_on_filesystem),
+            follow_symlinks: dto.follow_symlinks.unwrap_or(default.follow_symlinks),
+        }
+        .normalized()
+    }
+}
+
+impl Default for ScanConfigDto {
+    fn default() -> Self {
+        let config = ScanConfig::default();
+        Self {
+            requested_depth: Some(config.requested_depth),
+            preload_depth: Some(config.preload_depth),
+            show_hidden: Some(config.show_hidden),
+            expand_above_bytes: config.expand_above_bytes,
+            min_visible_folder_bytes: config.min_visible_folder_bytes,
+            stay_on_filesystem: Some(config.stay_on_filesystem),
+            follow_symlinks: Some(config.follow_symlinks),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanIssueDto {
+    pub path: String,
+    pub kind: String,
+    pub message: String,
+}
+
+impl From<&ScanIssue> for ScanIssueDto {
+    fn from(issue: &ScanIssue) -> Self {
+        Self {
+            path: issue.path.display().to_string(),
+            kind: format!("{:?}", issue.kind),
+            message: issue.message.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PathNodeDto {
+    pub path: String,
+    pub name: String,
+    pub kind: EntryKind,
+    pub parent_path: Option<String>,
+    pub depth_from_request: usize,
+    pub size: u64,
+    pub logical_size: u64,
+    pub state: NodeState,
+    pub visible: bool,
+    pub children_known: bool,
+    pub active_job_id: Option<String>,
+    pub issues: Vec<ScanIssueDto>,
+}
+
+impl From<&PathNode> for PathNodeDto {
+    fn from(node: &PathNode) -> Self {
+        Self {
+            path: node.path.display().to_string(),
+            name: node.name.clone(),
+            kind: node.kind,
+            parent_path: node.parent_path.as_ref().map(display_path),
+            depth_from_request: node.depth_from_request,
+            size: node.size,
+            logical_size: node.logical_size,
+            state: node.state,
+            visible: node.visible,
+            children_known: node.children_known,
+            active_job_id: node.active_job_id.clone(),
+            issues: node.issues.iter().map(ScanIssueDto::from).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryListingDto {
+    pub path: String,
+    pub config_fingerprint: String,
+    pub children: Vec<PathNodeDto>,
+    pub total_visible_size: u64,
+    pub total_measured_size: u64,
+    pub state: NodeState,
+    pub loaded_depth: usize,
+    pub has_more_depth: bool,
+    pub issues: Vec<ScanIssueDto>,
+    pub generation: u64,
+}
+
+impl From<&DirectoryListing> for DirectoryListingDto {
+    fn from(listing: &DirectoryListing) -> Self {
+        Self {
+            path: listing.path.display().to_string(),
+            config_fingerprint: listing.config_fingerprint.clone(),
+            children: listing.children.iter().map(PathNodeDto::from).collect(),
+            total_visible_size: listing.total_visible_size,
+            total_measured_size: listing.total_measured_size,
+            state: listing.state,
+            loaded_depth: listing.loaded_depth,
+            has_more_depth: listing.has_more_depth,
+            issues: listing.issues.iter().map(ScanIssueDto::from).collect(),
+            generation: listing.generation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartScanReceiptDto {
+    pub job_id: String,
+    pub request_id: String,
+}
+
+impl From<StartScanReceipt> for StartScanReceiptDto {
+    fn from(receipt: StartScanReceipt) -> Self {
+        Self {
+            job_id: receipt.job_id,
+            request_id: receipt.request_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InvalidationReceiptDto {
+    pub invalidated_paths: Vec<String>,
+    pub superseded_job_ids: Vec<String>,
+}
+
+impl From<InvalidationReceipt> for InvalidationReceiptDto {
+    fn from(receipt: InvalidationReceipt) -> Self {
+        Self {
+            invalidated_paths: receipt.invalidated_paths.iter().map(display_path).collect(),
+            superseded_job_ids: receipt.superseded_job_ids,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InvalidationScopeDto {
+    PathOnly,
+    PathAndDescendants,
+}
+
+impl From<InvalidationScopeDto> for InvalidationScope {
+    fn from(scope: InvalidationScopeDto) -> Self {
+        match scope {
+            InvalidationScopeDto::PathOnly => InvalidationScope::PathOnly,
+            InvalidationScopeDto::PathAndDescendants => InvalidationScope::PathAndDescendants,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+pub enum FsProgressEventDto {
+    JobQueued {
+        job_id: String,
+        request_id: String,
+        path: String,
+    },
+    JobStarted {
+        job_id: String,
+        request_id: String,
+        path: String,
+    },
+    DirectoryReady {
+        job_id: String,
+        request_id: String,
+        path: String,
+        listing: DirectoryListingDto,
+    },
+    ProgressSnapshot {
+        job_id: String,
+        request_id: String,
+        snapshot: ProgressSnapshot,
+    },
+    JobFinished {
+        job_id: String,
+        request_id: String,
+        path: String,
+    },
+    JobFailed {
+        job_id: String,
+        request_id: String,
+        path: String,
+        message: String,
+    },
+    PathInvalidated {
+        path: String,
+        scope: InvalidationScope,
+        generation: u64,
+    },
+}
+
+impl From<DriverEvent> for FsProgressEventDto {
+    fn from(event: DriverEvent) -> Self {
+        match event {
+            DriverEvent::JobQueued {
+                job_id,
+                request_id,
+                path,
+            } => Self::JobQueued {
+                job_id,
+                request_id,
+                path: display_path(&path),
+            },
+            DriverEvent::JobStarted {
+                job_id,
+                request_id,
+                path,
+            } => Self::JobStarted {
+                job_id,
+                request_id,
+                path: display_path(&path),
+            },
+            DriverEvent::DirectoryReady {
+                job_id,
+                request_id,
+                path,
+                listing,
+            } => Self::DirectoryReady {
+                job_id,
+                request_id,
+                path: display_path(&path),
+                listing: DirectoryListingDto::from(&listing),
+            },
+            DriverEvent::ProgressSnapshot {
+                job_id,
+                request_id,
+                snapshot,
+            } => Self::ProgressSnapshot {
+                job_id,
+                request_id,
+                snapshot,
+            },
+            DriverEvent::JobFinished {
+                job_id,
+                request_id,
+                path,
+            } => Self::JobFinished {
+                job_id,
+                request_id,
+                path: display_path(&path),
+            },
+            DriverEvent::JobFailed {
+                job_id,
+                request_id,
+                path,
+                message,
+            } => Self::JobFailed {
+                job_id,
+                request_id,
+                path: display_path(&path),
+                message,
+            },
+            DriverEvent::PathInvalidated {
+                path,
+                scope,
+                generation,
+            } => Self::PathInvalidated {
+                path: display_path(&path),
+                scope,
+                generation,
+            },
         }
     }
 }
@@ -191,6 +502,9 @@ pub enum CommandErrorCode {
     ScanStartFailed,
     UnknownSession,
     PathOutsideRoot,
+    PathOutsideVolume,
+    DriverUnavailable,
+    JobNotFound,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -233,5 +547,18 @@ mod tests {
 
         assert_eq!(dto.id, "/data");
         assert_eq!(dto.used_space, 60);
+    }
+
+    #[test]
+    fn serializes_progress_event_with_tagged_shape() {
+        let event = FsProgressEventDto::JobQueued {
+            job_id: "job".to_string(),
+            request_id: "req".to_string(),
+            path: "/tmp".to_string(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+
+        assert!(json.contains("jobQueued"));
     }
 }

@@ -3,6 +3,16 @@ import {
   checkFullDiskAccessPermission,
   requestFullDiskAccessPermission,
 } from "tauri-plugin-macos-permissions-api"
+import { Channel } from "@tauri-apps/api/core"
+
+import type {
+  DirectoryListingDto,
+  DriveDto as FsDriveDto,
+  FsProgressEvent,
+  InvalidationReceiptDto,
+  ScanConfigDto,
+  StartScanReceiptDto,
+} from "./features/fs-explorer/types"
 
 export type DriveDto = {
   id: string
@@ -81,4 +91,49 @@ export async function rescanSubtree(sessionId: string, path: string): Promise<Sc
 
 export async function getReadErrors(sessionId: string): Promise<ReadErrorDto[]> {
   return invoke<ReadErrorDto[]>("get_read_errors", { sessionId })
+}
+
+export async function fsListVolumes(): Promise<FsDriveDto[]> {
+  return invoke<FsDriveDto[]>("fs_list_volumes")
+}
+
+export async function fsOpenPath(
+  path: string,
+  volumeRoot: string,
+  config?: ScanConfigDto,
+): Promise<DirectoryListingDto> {
+  return invoke<DirectoryListingDto>("fs_open_path", { path, volumeRoot, config })
+}
+
+export async function fsGetDirectory(
+  path: string,
+  volumeRoot: string,
+  config?: ScanConfigDto,
+): Promise<DirectoryListingDto> {
+  return invoke<DirectoryListingDto>("fs_get_directory", { path, volumeRoot, config })
+}
+
+export async function fsStartScan(
+  path: string,
+  volumeRoot: string,
+  config: ScanConfigDto | undefined,
+  onProgress: (event: FsProgressEvent) => void,
+): Promise<StartScanReceiptDto> {
+  const progressChannel = new Channel<FsProgressEvent>()
+  progressChannel.onmessage = onProgress
+  return invoke<StartScanReceiptDto>("fs_start_scan", {
+    path,
+    volumeRoot,
+    config,
+    replaceExisting: true,
+    progressChannel,
+  })
+}
+
+export async function fsInvalidatePath(path: string, volumeRoot: string): Promise<InvalidationReceiptDto> {
+  return invoke<InvalidationReceiptDto>("fs_invalidate_path", {
+    path,
+    volumeRoot,
+    scope: "path_and_descendants",
+  })
 }

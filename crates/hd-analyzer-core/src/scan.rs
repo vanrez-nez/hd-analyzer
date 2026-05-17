@@ -10,6 +10,9 @@ use anyhow::{Context, Result};
 use rayon::prelude::*;
 
 use crate::categories::{collect_categories, detect_file_kind};
+use crate::driver::{DirectoryListing, EntryKind, NodeState, PathNode, ReadIssueKind, ScanIssue};
+use crate::rules::ScanConfig;
+use crate::size::{HardLinkDedupe, directory_measurement};
 use crate::{FileKind, ReadError, ScanProgress, ScanResult};
 
 #[derive(Debug)]
@@ -261,6 +264,223 @@ pub fn file_disk_usage(metadata: &Metadata) -> u64 {
     metadata.len()
 }
 
+pub fn discover_directory(path: &Path, config: &ScanConfig) -> std::io::Result<DirectoryListing> {
+    let path = path.canonicalize()?;
+    let mut dedupe = HardLinkDedupe::new();
+    discover_directory_inner(&path, &path, config, 0, &mut dedupe)
+}
+
+fn discover_directory_inner(
+    root: &Path,
+    path: &Path,
+    config: &ScanConfig,
+    depth: usize,
+    dedupe: &mut HardLinkDedupe,
+) -> std::io::Result<DirectoryListing> {
+    let mut children = Vec::new();
+    let mut issues = Vec::new();
+    let mut total_visible_size = 0u64;
+    let mut total_measured_size = 0u64;
+    let mut has_more_depth = false;
+
+    let root_device = if config.stay_on_filesystem {
+        get_device_id(root)
+    } else {
+        None
+    };
+
+    let entries = jwalk::WalkDir::new(path)
+        .min_depth(1)
+        .max_depth(1)
+        .skip_hidden(false)
+        .follow_links(config.follow_symlinks);
+
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) => {
+                issues.push(ScanIssue {
+                    path: error
+                        .path()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| path.to_path_buf()),
+                    kind: if error.io_error().is_some_and(|io_error| {
+                        io_error.kind() == std::io::ErrorKind::PermissionDenied
+                    }) {
+                        ReadIssueKind::PermissionDenied
+                    } else {
+                        ReadIssueKind::MetadataFailed
+                    },
+                    message: error.to_string(),
+                });
+                continue;
+            }
+        };
+
+        let entry_path = entry.path();
+        let name = entry.file_name.to_string_lossy().into_owned();
+
+        if config.is_hidden_name(&name) {
+            issues.push(ScanIssue {
+                path: entry_path,
+                kind: ReadIssueKind::HiddenSkipped,
+                message: "Hidden entry skipped by scan configuration.".to_string(),
+            });
+            continue;
+        }
+
+        let file_type = entry.file_type;
+
+        if entry.path_is_symlink() && !config.follow_symlinks {
+            issues.push(ScanIssue {
+                path: entry_path,
+                kind: ReadIssueKind::SymlinkSkipped,
+                message: "Symlink skipped by scan configuration.".to_string(),
+            });
+            continue;
+        }
+
+        if file_type.is_dir() {
+            if let Some(root_device) = root_device {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.dev() != root_device {
+                            issues.push(ScanIssue {
+                                path: entry_path,
+                                kind: ReadIssueKind::FilesystemBoundary,
+                                message: "Directory is on a different filesystem.".to_string(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            let (size, logical_size, children_known, node_issues, node_state) =
+                measure_directory_node(root, &entry_path, config, depth + 1, dedupe);
+            issues.extend(node_issues.clone());
+            total_measured_size = total_measured_size.saturating_add(size);
+
+            if config.should_show_folder(size) {
+                total_visible_size = total_visible_size.saturating_add(size);
+                has_more_depth |= !children_known;
+                children.push(PathNode {
+                    path: entry_path.clone(),
+                    name,
+                    kind: EntryKind::Directory,
+                    parent_path: Some(path.to_path_buf()),
+                    depth_from_request: depth + 1,
+                    size,
+                    logical_size,
+                    state: node_state,
+                    visible: true,
+                    children_known,
+                    active_job_id: None,
+                    issues: node_issues,
+                });
+            }
+        } else if file_type.is_file() {
+            match entry.metadata() {
+                Ok(metadata) => {
+                    let measurement = dedupe.measure_file(&entry_path, &metadata);
+                    total_measured_size =
+                        total_measured_size.saturating_add(measurement.allocated_bytes);
+                    total_visible_size =
+                        total_visible_size.saturating_add(measurement.allocated_bytes);
+                    children.push(PathNode {
+                        path: entry_path,
+                        name,
+                        kind: EntryKind::File,
+                        parent_path: Some(path.to_path_buf()),
+                        depth_from_request: depth + 1,
+                        size: measurement.allocated_bytes,
+                        logical_size: measurement.logical_bytes,
+                        state: NodeState::Complete,
+                        visible: true,
+                        children_known: true,
+                        active_job_id: None,
+                        issues: Vec::new(),
+                    });
+                }
+                Err(error) => issues.push(ScanIssue {
+                    path: entry_path,
+                    kind: ReadIssueKind::MetadataFailed,
+                    message: error.to_string(),
+                }),
+            }
+        }
+    }
+
+    children.sort_by(|left, right| {
+        right
+            .size
+            .cmp(&left.size)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+
+    Ok(DirectoryListing {
+        path: path.to_path_buf(),
+        config_fingerprint: config.fingerprint(),
+        children,
+        total_visible_size,
+        total_measured_size,
+        state: NodeState::Complete,
+        loaded_depth: config.preload_depth.min(config.requested_depth),
+        has_more_depth,
+        issues,
+        generation: 0,
+    })
+}
+
+fn measure_directory_node(
+    root: &Path,
+    path: &Path,
+    config: &ScanConfig,
+    depth: usize,
+    dedupe: &mut HardLinkDedupe,
+) -> (u64, u64, bool, Vec<ScanIssue>, NodeState) {
+    if depth > config.preload_depth {
+        return (0, 0, false, Vec::new(), NodeState::Queued);
+    }
+
+    match discover_directory_inner(root, path, config, depth, dedupe) {
+        Ok(listing) => {
+            let measurement = directory_measurement(listing.total_measured_size, 0);
+            let should_expand = config.should_expand_folder(measurement.allocated_bytes, depth);
+            let children_known = depth >= config.requested_depth || !should_expand;
+            let state = if children_known {
+                NodeState::Complete
+            } else {
+                NodeState::Partial
+            };
+            (
+                measurement.allocated_bytes,
+                measurement.logical_bytes,
+                children_known,
+                listing.issues,
+                state,
+            )
+        }
+        Err(error) => (
+            0,
+            0,
+            true,
+            vec![ScanIssue {
+                path: path.to_path_buf(),
+                kind: if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    ReadIssueKind::PermissionDenied
+                } else {
+                    ReadIssueKind::MetadataFailed
+                },
+                message: error.to_string(),
+            }],
+            NodeState::Failed,
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -298,5 +518,42 @@ mod tests {
         let result = scan_drive(dir.path(), Instant::now(), &tx, false).unwrap();
 
         assert_eq!(result.files_scanned, 1);
+    }
+
+    #[test]
+    fn discover_directory_filters_hidden_entries_by_default() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden"), b"abc").unwrap();
+        std::fs::write(dir.path().join("visible"), b"abc").unwrap();
+
+        let listing = discover_directory(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(listing.children.len(), 1);
+        assert_eq!(listing.issues.len(), 1);
+    }
+
+    #[test]
+    fn discover_directory_filters_small_folders() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("small")).unwrap();
+        std::fs::write(dir.path().join("small").join("file.txt"), b"abc").unwrap();
+
+        let listing = discover_directory(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: Some(u64::MAX),
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap();
+
+        assert!(listing.children.is_empty());
     }
 }

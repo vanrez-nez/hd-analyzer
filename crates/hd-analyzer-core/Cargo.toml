@@ -7,9 +7,15 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 humansize.workspace = true
+jwalk.workspace = true
+nix.workspace = true
 rayon.workspace = true
 serde.workspace = true
 sysinfo.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
 
 [dev-dependencies]
 tempfile = "3.10"

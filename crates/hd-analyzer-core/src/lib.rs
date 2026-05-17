@@ -1,15 +1,27 @@
+pub mod cache;
 pub mod categories;
+pub mod driver;
 pub mod drives;
+pub mod jobs;
 pub mod paths;
+pub mod rules;
 pub mod scan;
+pub mod size;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 pub use categories::{collect_categories, detect_file_kind};
+pub use driver::{
+    DirectoryListing, DriverError, DriverEvent, DriverResult, EntryKind, HdDriver,
+    InvalidationReceipt, InvalidationScope, LocalHdDriver, NodeState, OpenPathRequest, PathNode,
+    ReadIssueKind, ScanIssue, StartScanReceipt, StartScanRequest, Volume,
+};
 pub use drives::{Drive, list_drives};
+pub use jobs::{JobState, ProgressSnapshot};
 pub use paths::{compact_path, format_bytes, format_ratio};
+pub use rules::ScanConfig;
 pub use scan::{ScanUpdate, file_disk_usage, load_current_subdirectories, scan_drive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]

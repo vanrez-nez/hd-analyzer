@@ -1,16 +1,21 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::MutexGuard;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
-use hd_analyzer_core::{ScanResult, ScanUpdate, list_drives as core_list_drives, scan_drive};
-use tauri::State;
+use hd_analyzer_core::{
+    HdDriver, OpenPathRequest, ScanResult, ScanUpdate, StartScanRequest,
+    list_drives as core_list_drives, scan_drive,
+};
+use tauri::{State, ipc::Channel};
 
 use crate::dto::{
-    CommandError, CommandErrorCode, DirectoryEntryDto, DriveDto, PermissionCheckDto, ReadErrorDto,
-    ScanSessionDto, SessionStatusDto,
+    CommandError, CommandErrorCode, DirectoryEntryDto, DirectoryListingDto, DriveDto,
+    FsProgressEventDto, InvalidationReceiptDto, InvalidationScopeDto, PermissionCheckDto,
+    ReadErrorDto, ScanConfigDto, ScanSessionDto, SessionStatusDto, StartScanReceiptDto,
 };
 use crate::state::{AppState, StoredSession};
 
@@ -26,6 +31,105 @@ pub fn list_drives() -> Result<Vec<DriveDto>, CommandError> {
         ));
     }
     Ok(drives.iter().map(DriveDto::from).collect())
+}
+
+#[tauri::command]
+pub fn fs_list_volumes(state: State<'_, AppState>) -> Result<Vec<DriveDto>, CommandError> {
+    let volumes = state.fs_driver.list_volumes().map_err(command_error)?;
+    if volumes.is_empty() {
+        return Err(CommandError::new(
+            CommandErrorCode::NoDrives,
+            "No mounted drives found.",
+        ));
+    }
+    Ok(volumes.iter().map(DriveDto::from).collect())
+}
+
+#[tauri::command]
+pub fn fs_open_path(
+    path: String,
+    volume_root: String,
+    config: Option<ScanConfigDto>,
+    state: State<'_, AppState>,
+) -> Result<DirectoryListingDto, CommandError> {
+    let request = OpenPathRequest {
+        volume_root: PathBuf::from(volume_root),
+        path: PathBuf::from(path),
+        config: config.unwrap_or_default().into(),
+        request_id: chrono_like_timestamp(),
+    };
+    state
+        .fs_driver
+        .open_path(request)
+        .map(|listing| DirectoryListingDto::from(&listing))
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn fs_get_directory(
+    path: String,
+    volume_root: String,
+    config: Option<ScanConfigDto>,
+    state: State<'_, AppState>,
+) -> Result<DirectoryListingDto, CommandError> {
+    let config = config.unwrap_or_default().into();
+    state
+        .fs_driver
+        .get_directory(&PathBuf::from(volume_root), &PathBuf::from(path), &config)
+        .map(|listing| DirectoryListingDto::from(&listing))
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn fs_start_scan(
+    path: String,
+    volume_root: String,
+    config: Option<ScanConfigDto>,
+    replace_existing: Option<bool>,
+    progress_channel: Channel<FsProgressEventDto>,
+    state: State<'_, AppState>,
+) -> Result<StartScanReceiptDto, CommandError> {
+    let channel = progress_channel.clone();
+    let sink = Arc::new(move |event| {
+        let _ = channel.send(FsProgressEventDto::from(event));
+    });
+    state
+        .fs_driver
+        .start_scan(
+            StartScanRequest {
+                volume_root: PathBuf::from(volume_root),
+                path: PathBuf::from(path),
+                config: config.unwrap_or_default().into(),
+                replace_existing: replace_existing.unwrap_or(true),
+                request_id: chrono_like_timestamp(),
+            },
+            Some(sink),
+        )
+        .map(StartScanReceiptDto::from)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn fs_cancel_job(job_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.fs_driver.cancel_job(&job_id).map_err(command_error)
+}
+
+#[tauri::command]
+pub fn fs_invalidate_path(
+    path: String,
+    volume_root: String,
+    scope: InvalidationScopeDto,
+    state: State<'_, AppState>,
+) -> Result<InvalidationReceiptDto, CommandError> {
+    state
+        .fs_driver
+        .invalidate_path(
+            &PathBuf::from(volume_root),
+            &PathBuf::from(path),
+            scope.into(),
+        )
+        .map(InvalidationReceiptDto::from)
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -267,6 +371,18 @@ fn chrono_like_timestamp() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
+fn command_error(error: hd_analyzer_core::DriverError) -> CommandError {
+    let code = match error {
+        hd_analyzer_core::DriverError::JobNotFound(_) => CommandErrorCode::JobNotFound,
+        hd_analyzer_core::DriverError::DriverUnavailable(_) => CommandErrorCode::DriverUnavailable,
+        hd_analyzer_core::DriverError::InvalidPath(_) => CommandErrorCode::InvalidRoot,
+        hd_analyzer_core::DriverError::PathOutsideVolume(_) => CommandErrorCode::PathOutsideVolume,
+        hd_analyzer_core::DriverError::PermissionDenied(_) => CommandErrorCode::PathOutsideRoot,
+        hd_analyzer_core::DriverError::Io { .. } => CommandErrorCode::DriverUnavailable,
+    };
+    CommandError::new(code, error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +392,14 @@ mod tests {
         let error =
             ensure_inside_root(Path::new("/tmp/other"), Path::new("/tmp/root")).unwrap_err();
         assert_eq!(error.code, CommandErrorCode::PathOutsideRoot);
+    }
+
+    #[test]
+    fn maps_outside_volume_driver_error_to_outside_volume_code() {
+        let error = command_error(hd_analyzer_core::DriverError::PathOutsideVolume(
+            "outside".to_string(),
+        ));
+
+        assert_eq!(error.code, CommandErrorCode::PathOutsideVolume);
     }
 }
