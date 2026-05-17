@@ -13,6 +13,7 @@ pub struct ScanConfig {
     pub min_visible_folder_bytes: Option<u64>,
     pub stay_on_filesystem: bool,
     pub follow_symlinks: bool,
+    pub dedupe_hard_links: bool,
 }
 
 impl Default for ScanConfig {
@@ -25,6 +26,7 @@ impl Default for ScanConfig {
             min_visible_folder_bytes: Some(100_000_000),
             stay_on_filesystem: true,
             follow_symlinks: false,
+            dedupe_hard_links: true,
         }
     }
 }
@@ -85,6 +87,17 @@ mod tests {
         };
 
         assert_ne!(hidden.fingerprint(), visible.fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_changes_when_hard_link_policy_changes() {
+        let deduped = ScanConfig::default();
+        let counted_per_path = ScanConfig {
+            dedupe_hard_links: false,
+            ..ScanConfig::default()
+        };
+
+        assert_ne!(deduped.fingerprint(), counted_per_path.fingerprint());
     }
 
     #[test]

@@ -206,6 +206,11 @@ fn walk_dir_parallel(
         };
 
         if file_type.is_symlink() {
+            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                let size = metadata.len();
+                let kind = detect_file_kind(&path);
+                let _ = tx.send((path.clone(), size, Some(kind)));
+            }
             return;
         }
 
@@ -342,12 +347,41 @@ fn discover_directory_inner(
         let file_type = entry.file_type;
 
         if entry.path_is_symlink() && !config.follow_symlinks {
-            if is_visible_by_config {
-                issues.push(ScanIssue {
+            match std::fs::symlink_metadata(&entry_path) {
+                Ok(metadata) => {
+                    let measurement = dedupe.measure_file_with_policy(
+                        &entry_path,
+                        &metadata,
+                        config.dedupe_hard_links,
+                    );
+                    total_measured_size =
+                        total_measured_size.saturating_add(measurement.allocated_bytes);
+                    total_logical_size =
+                        total_logical_size.saturating_add(measurement.logical_bytes);
+                    if is_visible_by_config {
+                        total_visible_size =
+                            total_visible_size.saturating_add(measurement.allocated_bytes);
+                        children.push(PathNode {
+                            path: entry_path,
+                            name,
+                            kind: EntryKind::File,
+                            parent_path: Some(path.to_path_buf()),
+                            depth_from_request: depth + 1,
+                            size: measurement.allocated_bytes,
+                            logical_size: measurement.logical_bytes,
+                            state: NodeState::Complete,
+                            visible: true,
+                            children_known: true,
+                            active_job_id: None,
+                            issues: Vec::new(),
+                        });
+                    }
+                }
+                Err(error) => issues.push(ScanIssue {
                     path: entry_path,
-                    kind: ReadIssueKind::SymlinkSkipped,
-                    message: "Symlink skipped by scan configuration.".to_string(),
-                });
+                    kind: ReadIssueKind::MetadataFailed,
+                    message: error.to_string(),
+                }),
             }
             continue;
         }
@@ -399,7 +433,11 @@ fn discover_directory_inner(
         } else if file_type.is_file() {
             match entry.metadata() {
                 Ok(metadata) => {
-                    let measurement = dedupe.measure_file(&entry_path, &metadata);
+                    let measurement = dedupe.measure_file_with_policy(
+                        &entry_path,
+                        &metadata,
+                        config.dedupe_hard_links,
+                    );
                     total_measured_size =
                         total_measured_size.saturating_add(measurement.allocated_bytes);
                     total_logical_size =
@@ -541,12 +579,41 @@ fn discover_directory_precise_inner(
         let is_visible_by_config = !config.is_hidden_name(&name);
 
         if entry.path_is_symlink() && !config.follow_symlinks {
-            if is_visible_by_config {
-                issues.push(ScanIssue {
+            match std::fs::symlink_metadata(&entry_path) {
+                Ok(metadata) => {
+                    let measurement = dedupe.measure_file_with_policy(
+                        &entry_path,
+                        &metadata,
+                        config.dedupe_hard_links,
+                    );
+                    total_measured_size =
+                        total_measured_size.saturating_add(measurement.allocated_bytes);
+                    total_logical_size =
+                        total_logical_size.saturating_add(measurement.logical_bytes);
+                    if is_visible_by_config {
+                        total_visible_size =
+                            total_visible_size.saturating_add(measurement.allocated_bytes);
+                        children.push(PathNode {
+                            path: entry_path,
+                            name,
+                            kind: EntryKind::File,
+                            parent_path: Some(path.to_path_buf()),
+                            depth_from_request: 1,
+                            size: measurement.allocated_bytes,
+                            logical_size: measurement.logical_bytes,
+                            state: NodeState::Complete,
+                            visible: true,
+                            children_known: true,
+                            active_job_id: None,
+                            issues: Vec::new(),
+                        });
+                    }
+                }
+                Err(error) => issues.push(ScanIssue {
                     path: entry_path,
-                    kind: ReadIssueKind::SymlinkSkipped,
-                    message: "Symlink skipped by scan configuration.".to_string(),
-                });
+                    kind: ReadIssueKind::MetadataFailed,
+                    message: error.to_string(),
+                }),
             }
             continue;
         }
@@ -591,7 +658,11 @@ fn discover_directory_precise_inner(
         } else if file_type.is_file() {
             match entry.metadata() {
                 Ok(metadata) => {
-                    let measurement = dedupe.measure_file(&entry_path, &metadata);
+                    let measurement = dedupe.measure_file_with_policy(
+                        &entry_path,
+                        &metadata,
+                        config.dedupe_hard_links,
+                    );
                     total_measured_size =
                         total_measured_size.saturating_add(measurement.allocated_bytes);
                     total_logical_size =
@@ -670,12 +741,27 @@ fn measure_directory_tree(
         let is_visible_by_config = !config.is_hidden_name(&name);
 
         if entry.path_is_symlink() && !config.follow_symlinks {
-            if is_visible_by_config {
-                measurement.issues.push(ScanIssue {
+            match std::fs::symlink_metadata(&entry_path) {
+                Ok(metadata) => {
+                    if is_visible_by_config {
+                        measurement.has_visible_children = true;
+                    }
+                    let file = dedupe.measure_file_with_policy(
+                        &entry_path,
+                        &metadata,
+                        config.dedupe_hard_links,
+                    );
+                    measurement.allocated_bytes = measurement
+                        .allocated_bytes
+                        .saturating_add(file.allocated_bytes);
+                    measurement.logical_bytes =
+                        measurement.logical_bytes.saturating_add(file.logical_bytes);
+                }
+                Err(error) => measurement.issues.push(ScanIssue {
                     path: entry_path,
-                    kind: ReadIssueKind::SymlinkSkipped,
-                    message: "Symlink skipped by scan configuration.".to_string(),
-                });
+                    kind: ReadIssueKind::MetadataFailed,
+                    message: error.to_string(),
+                }),
             }
             continue;
         }
@@ -711,7 +797,11 @@ fn measure_directory_tree(
                     if is_visible_by_config {
                         measurement.has_visible_children = true;
                     }
-                    let file = dedupe.measure_file(&entry_path, &metadata);
+                    let file = dedupe.measure_file_with_policy(
+                        &entry_path,
+                        &metadata,
+                        config.dedupe_hard_links,
+                    );
                     measurement.allocated_bytes = measurement
                         .allocated_bytes
                         .saturating_add(file.allocated_bytes);
@@ -817,18 +907,18 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn skips_symlinked_files() {
+    fn scan_drive_counts_symlink_entries_without_following_targets() {
         use std::os::unix::fs::symlink;
 
         let dir = tempdir().unwrap();
         let target = dir.path().join("target.txt");
         std::fs::write(&target, b"abc").unwrap();
-        symlink(&target, dir.path().join("link.txt")).unwrap();
+        symlink("target.txt", dir.path().join("link.txt")).unwrap();
 
         let (tx, _rx) = mpsc::channel();
         let result = scan_drive(dir.path(), Instant::now(), &tx, false).unwrap();
 
-        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.files_scanned, 2);
     }
 
     #[test]
@@ -928,6 +1018,36 @@ mod tests {
         assert!(top_node.size > 0);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn precise_directory_discovery_counts_symlink_entry_without_following_target() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("target.txt"), b"abc").unwrap();
+        symlink("target.txt", dir.path().join("link.txt")).unwrap();
+
+        let listing = discover_directory_with_precise_sizes(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap()
+        .listing;
+        let link_node = listing
+            .children
+            .iter()
+            .find(|node| node.name == "link.txt")
+            .unwrap();
+
+        assert_eq!(link_node.kind, EntryKind::File);
+        assert_eq!(link_node.logical_size, "target.txt".len() as u64);
+        assert!(listing.total_logical_size >= 3 + "target.txt".len() as u64);
+        assert!(listing.issues.is_empty());
+    }
+
     #[test]
     fn precise_directory_discovery_counts_hidden_subtrees_without_emitting_rows() {
         let dir = tempdir().unwrap();
@@ -1008,6 +1128,43 @@ mod tests {
                 .children
                 .iter()
                 .any(|node| node.name == ".hidden")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn precise_directory_discovery_counts_hard_links_per_path_when_configured() {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("first.bin");
+        let second = dir.path().join("second.bin");
+        std::fs::write(&first, vec![1u8; 8192]).unwrap();
+        std::fs::hard_link(&first, &second).unwrap();
+
+        let unique_listing = discover_directory_with_precise_sizes(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                dedupe_hard_links: true,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap()
+        .listing;
+        let per_path_listing = discover_directory_with_precise_sizes(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                dedupe_hard_links: false,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap()
+        .listing;
+
+        assert!(unique_listing.total_measured_size > 0);
+        assert_eq!(
+            per_path_listing.total_measured_size,
+            unique_listing.total_measured_size * 2
         );
     }
 

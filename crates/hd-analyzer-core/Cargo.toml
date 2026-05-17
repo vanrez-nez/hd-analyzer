@@ -17,5 +17,8 @@ thiserror.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation-sys.workspace = true
+
 [dev-dependencies]
 tempfile = "3.10"

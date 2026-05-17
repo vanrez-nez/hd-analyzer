@@ -59,6 +59,7 @@ pub struct ScanConfigDto {
     pub min_visible_folder_bytes: Option<u64>,
     pub stay_on_filesystem: Option<bool>,
     pub follow_symlinks: Option<bool>,
+    pub dedupe_hard_links: Option<bool>,
 }
 
 impl From<ScanConfigDto> for ScanConfig {
@@ -72,6 +73,7 @@ impl From<ScanConfigDto> for ScanConfig {
             min_visible_folder_bytes: dto.min_visible_folder_bytes,
             stay_on_filesystem: dto.stay_on_filesystem.unwrap_or(default.stay_on_filesystem),
             follow_symlinks: dto.follow_symlinks.unwrap_or(default.follow_symlinks),
+            dedupe_hard_links: dto.dedupe_hard_links.unwrap_or(default.dedupe_hard_links),
         }
         .normalized()
     }
@@ -88,6 +90,7 @@ impl Default for ScanConfigDto {
             min_visible_folder_bytes: config.min_visible_folder_bytes,
             stay_on_filesystem: Some(config.stay_on_filesystem),
             follow_symlinks: Some(config.follow_symlinks),
+            dedupe_hard_links: Some(config.dedupe_hard_links),
         }
     }
 }

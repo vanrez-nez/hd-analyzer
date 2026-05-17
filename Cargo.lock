@@ -1409,6 +1409,7 @@ name = "hd-analyzer-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "core-foundation-sys",
  "humansize",
  "jwalk",
  "nix",

@@ -95,6 +95,22 @@ impl DirectoryCache {
         precise: PreciseDirectoryScan,
         freshness: CacheFreshness,
     ) -> DirectoryCacheEntry {
+        let root_summary = DirectorySizeSummary {
+            path: precise.listing.path.clone(),
+            config_fingerprint: precise.listing.config_fingerprint.clone(),
+            allocated_size: precise.listing.total_measured_size,
+            logical_size: precise.listing.total_logical_size,
+            has_visible_children: precise.listing.children.iter().any(|child| child.visible),
+            issues: precise.listing.issues.clone(),
+        };
+        self.summaries.insert(
+            CacheKey {
+                path: root_summary.path.clone(),
+                config_fingerprint: root_summary.config_fingerprint.clone(),
+            },
+            root_summary,
+        );
+
         for summary in precise.summaries {
             self.summaries.insert(
                 CacheKey {
@@ -218,6 +234,20 @@ mod tests {
     }
 
     #[test]
+    fn precise_upsert_stores_root_directory_size_summary() {
+        let mut cache = DirectoryCache::default();
+        let mut root = listing("/tmp");
+        root.total_measured_size = 20;
+        root.total_logical_size = 30;
+        cache_upsert_precise_root(&mut cache, root);
+
+        let summary = cache.get_summary(Path::new("/tmp"), "a").unwrap();
+
+        assert_eq!(summary.allocated_size, 20);
+        assert_eq!(summary.logical_size, 30);
+    }
+
+    #[test]
     fn descendant_invalidation_removes_size_summaries() {
         let mut cache = DirectoryCache::default();
         cache.upsert_precise(
@@ -232,5 +262,15 @@ mod tests {
 
         assert!(cache.get_summary(Path::new("/tmp/a/b"), "a").is_none());
         assert!(cache.get_summary(Path::new("/tmp/c"), "a").is_some());
+    }
+
+    fn cache_upsert_precise_root(cache: &mut DirectoryCache, listing: DirectoryListing) {
+        cache.upsert_precise(
+            PreciseDirectoryScan {
+                listing,
+                summaries: Vec::new(),
+            },
+            CacheFreshness::Fresh,
+        );
     }
 }

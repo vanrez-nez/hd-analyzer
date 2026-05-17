@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { RefreshCwIcon } from "lucide-react"
 
 import { fsListVolumes, fsOpenPath, fsStartScan } from "@/api"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ExplorerTable } from "./ExplorerTable"
 import { PathButtonGroup } from "./PathButtonGroup"
 import { createExplorerCache, getCachedListing, putCachedListing } from "./cache"
@@ -25,6 +28,8 @@ export function FsExplorer() {
     () => (currentPath ? getCachedListing(cache, currentPath) : undefined),
     [cache, currentPath],
   )
+  const canReloadCurrentPath = Boolean(selectedVolume && currentPath)
+  const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
 
   useEffect(() => {
     fsListVolumes()
@@ -86,6 +91,21 @@ export function FsExplorer() {
     }
   }
 
+  const reloadCurrentPath = useCallback(async () => {
+    if (!selectedVolume || !currentPath) {
+      return
+    }
+
+    setError(undefined)
+    setLoadingPath(currentPath)
+    try {
+      await fsStartScan(currentPath, selectedVolume.mountPoint, defaultScanConfig, handleProgress)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+      setLoadingPath(undefined)
+    }
+  }, [currentPath, handleProgress, selectedVolume])
+
   const returnToVolumes = () => {
     setSelectedVolume(undefined)
     setCurrentPath(undefined)
@@ -95,14 +115,32 @@ export function FsExplorer() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex min-h-8 items-center overflow-hidden">
-        <PathButtonGroup
-          path={currentPath}
-          rootPath={selectedVolume?.mountPoint}
-          rootLabel={selectedVolume?.label}
-          onNavigate={(path) => void openPath(path)}
-          onBackToRoot={returnToVolumes}
-        />
+      <div className="flex min-h-8 items-center gap-2 overflow-hidden">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <PathButtonGroup
+            path={currentPath}
+            rootPath={selectedVolume?.mountPoint}
+            rootLabel={selectedVolume?.label}
+            onNavigate={(path) => void openPath(path)}
+            onBackToRoot={returnToVolumes}
+          />
+        </div>
+        {canReloadCurrentPath ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Reload current path"
+            disabled={isReloadingCurrentPath}
+            onClick={() => void reloadCurrentPath()}
+          >
+            {isReloadingCurrentPath ? (
+              <Spinner />
+            ) : (
+              <RefreshCwIcon data-icon="inline-start" />
+            )}
+          </Button>
+        ) : null}
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <ExplorerTable

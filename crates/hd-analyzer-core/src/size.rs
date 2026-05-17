@@ -44,6 +44,7 @@ impl SizeIdentity {
 #[serde(rename_all = "snake_case")]
 pub enum MeasurementMethod {
     UnixBlocks,
+    MacOsUrlResource,
     WindowsCompressedSize,
     LogicalFallback,
     DirectoryAggregate,
@@ -70,20 +71,27 @@ impl HardLinkDedupe {
     }
 
     pub fn measure_file(&mut self, path: &Path, metadata: &Metadata) -> SizeMeasurement {
+        self.measure_file_with_policy(path, metadata, true)
+    }
+
+    pub fn measure_file_with_policy(
+        &mut self,
+        path: &Path,
+        metadata: &Metadata,
+        dedupe_hard_links: bool,
+    ) -> SizeMeasurement {
         let identity = hard_link_identity(metadata);
-        let deduped = identity
-            .as_ref()
-            .is_some_and(|identity| !self.seen.insert(identity.clone()));
-        let (allocated_bytes, measurement_method) = if deduped {
-            (0, platform_allocated_size(path, metadata).1)
-        } else {
-            platform_allocated_size(path, metadata)
-        };
+        let deduped = dedupe_hard_links
+            && identity
+                .as_ref()
+                .is_some_and(|identity| !self.seen.insert(identity.clone()));
+        let size = platform_file_size(path, metadata);
+        let allocated_bytes = if deduped { 0 } else { size.allocated_bytes };
 
         SizeMeasurement {
             allocated_bytes,
-            logical_bytes: metadata.len(),
-            measurement_method,
+            logical_bytes: size.logical_bytes,
+            measurement_method: size.measurement_method,
             identity,
             deduped,
         }
@@ -100,6 +108,13 @@ pub fn directory_measurement(allocated_bytes: u64, logical_bytes: u64) -> SizeMe
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FileSize {
+    allocated_bytes: u64,
+    logical_bytes: u64,
+    measurement_method: MeasurementMethod,
+}
+
 fn hard_link_identity(metadata: &Metadata) -> Option<SizeIdentity> {
     #[cfg(unix)]
     {
@@ -113,7 +128,30 @@ fn hard_link_identity(metadata: &Metadata) -> Option<SizeIdentity> {
     None
 }
 
+fn platform_file_size(path: &Path, metadata: &Metadata) -> FileSize {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(size) = macos_url_resource_size(path) {
+            return size;
+        }
+    }
+
+    let (allocated_bytes, measurement_method) = platform_allocated_size(path, metadata);
+    FileSize {
+        allocated_bytes,
+        logical_bytes: metadata.len(),
+        measurement_method,
+    }
+}
+
 pub fn platform_allocated_size(path: &Path, metadata: &Metadata) -> (u64, MeasurementMethod) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(size) = macos_url_resource_size(path) {
+            return (size.allocated_bytes, size.measurement_method);
+        }
+    }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -132,6 +170,99 @@ pub fn platform_allocated_size(path: &Path, metadata: &Metadata) -> (u64, Measur
 
     let _ = path;
     (metadata.len(), MeasurementMethod::LogicalFallback)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_url_resource_size(path: &Path) -> Option<FileSize> {
+    let logical_bytes = macos_url_resource_number(
+        path,
+        &[
+            unsafe { core_foundation_sys::url::kCFURLTotalFileSizeKey },
+            unsafe { core_foundation_sys::url::kCFURLFileSizeKey },
+        ],
+    )?;
+    let allocated_bytes = macos_url_resource_number(
+        path,
+        &[
+            unsafe { core_foundation_sys::url::kCFURLTotalFileAllocatedSizeKey },
+            unsafe { core_foundation_sys::url::kCFURLFileAllocatedSizeKey },
+        ],
+    )
+    .unwrap_or(logical_bytes);
+
+    Some(FileSize {
+        allocated_bytes,
+        logical_bytes,
+        measurement_method: MeasurementMethod::MacOsUrlResource,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_url_resource_number(
+    path: &Path,
+    keys: &[core_foundation_sys::string::CFStringRef],
+) -> Option<u64> {
+    use std::ffi::c_void;
+    use std::os::unix::ffi::OsStrExt;
+    use std::ptr;
+
+    use core_foundation_sys::base::{Boolean, CFRelease, CFTypeRef};
+    use core_foundation_sys::error::CFErrorRef;
+    use core_foundation_sys::number::{CFNumberGetValue, kCFNumberSInt64Type};
+    use core_foundation_sys::url::{CFURLCreateFromFileSystemRepresentation, CFURLRef};
+
+    unsafe extern "C" {
+        fn CFURLCopyResourcePropertyForKey(
+            url: CFURLRef,
+            key: core_foundation_sys::string::CFStringRef,
+            property_value_type_ref_ptr: *mut CFTypeRef,
+            error: *mut CFErrorRef,
+        ) -> Boolean;
+    }
+
+    let bytes = path.as_os_str().as_bytes();
+    let url = unsafe {
+        CFURLCreateFromFileSystemRepresentation(
+            ptr::null(),
+            bytes.as_ptr(),
+            bytes.len() as isize,
+            false as Boolean,
+        )
+    };
+    if url.is_null() {
+        return None;
+    }
+
+    let mut result = None;
+    for key in keys {
+        let mut value: CFTypeRef = ptr::null();
+        let found =
+            unsafe { CFURLCopyResourcePropertyForKey(url, *key, &mut value, ptr::null_mut()) };
+        if found == 0 || value.is_null() {
+            continue;
+        }
+
+        let mut signed_value = 0i64;
+        let converted = unsafe {
+            CFNumberGetValue(
+                value.cast(),
+                kCFNumberSInt64Type,
+                (&mut signed_value as *mut i64).cast::<c_void>(),
+            )
+        };
+        unsafe {
+            CFRelease(value);
+        }
+        if converted && signed_value >= 0 {
+            result = Some(signed_value as u64);
+            break;
+        }
+    }
+
+    unsafe {
+        CFRelease(url.cast());
+    }
+    result
 }
 
 #[cfg(windows)]
@@ -170,6 +301,25 @@ mod tests {
         assert!(measurement.allocated_bytes > 0);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn measurement_uses_macos_url_resource_logical_size() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+        std::fs::write(&path, b"hello").unwrap();
+
+        let metadata = std::fs::metadata(&path).unwrap();
+        let mut dedupe = HardLinkDedupe::new();
+        let measurement = dedupe.measure_file(&path, &metadata);
+
+        assert_eq!(
+            measurement.measurement_method,
+            MeasurementMethod::MacOsUrlResource
+        );
+        assert_eq!(measurement.logical_bytes, 5);
+        assert!(measurement.allocated_bytes >= 5);
+    }
+
     #[cfg(unix)]
     #[test]
     fn hard_linked_file_counts_allocated_size_once() {
@@ -185,5 +335,25 @@ mod tests {
 
         assert!(first_size.allocated_bytes > 0);
         assert_eq!(second_size.allocated_bytes, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hard_linked_file_counts_allocated_size_per_path_when_dedupe_disabled() {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("first.bin");
+        let second = dir.path().join("second.bin");
+        std::fs::write(&first, b"linked").unwrap();
+        std::fs::hard_link(&first, &second).unwrap();
+
+        let mut dedupe = HardLinkDedupe::new();
+        let first_size =
+            dedupe.measure_file_with_policy(&first, &std::fs::metadata(&first).unwrap(), false);
+        let second_size =
+            dedupe.measure_file_with_policy(&second, &std::fs::metadata(&second).unwrap(), false);
+
+        assert!(first_size.allocated_bytes > 0);
+        assert_eq!(second_size.allocated_bytes, first_size.allocated_bytes);
+        assert!(!second_size.deduped);
     }
 }

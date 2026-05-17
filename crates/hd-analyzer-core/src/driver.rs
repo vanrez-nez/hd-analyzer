@@ -403,14 +403,17 @@ impl HdDriver for LocalHdDriver {
         let config = config.clone().normalized();
         let scoped_path = self.scoped_existing_path(volume_root, path)?;
         let fingerprint = config.fingerprint();
-        if let Some(entry) = self
-            .cache
-            .lock()
-            .expect("directory cache poisoned")
-            .get(&scoped_path, &fingerprint)
-        {
+        let cached_entry = {
+            self.cache
+                .lock()
+                .expect("directory cache poisoned")
+                .get(&scoped_path, &fingerprint)
+        };
+        if let Some(entry) = cached_entry {
             if entry.freshness != CacheFreshness::Stale {
-                return Ok(entry.listing);
+                let mut listing = entry.listing;
+                self.enrich_listing_from_cached_summaries(&mut listing);
+                return Ok(listing);
             }
         }
         self.discover_and_cache(&scoped_path, &config)
@@ -717,6 +720,48 @@ mod tests {
         assert_eq!(nested_node.state, NodeState::Complete);
         assert!(nested_node.size > 0);
         assert!(!listing.children.iter().any(|node| node.name == ".hidden"));
+    }
+
+    #[test]
+    fn parent_listing_reuses_precise_scan_root_size_summary() {
+        let volume = tempdir().unwrap();
+        let parent = volume.path().join("parent");
+        let child = parent.join("child");
+        let deep = child.join("deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("file.txt"), b"abc").unwrap();
+        let driver = LocalHdDriver::new();
+        let config = ScanConfig {
+            requested_depth: 2,
+            preload_depth: 1,
+            min_visible_folder_bytes: None,
+            ..ScanConfig::default()
+        };
+
+        let initial_parent = driver
+            .get_directory(volume.path(), &parent, &config)
+            .unwrap();
+        let initial_child = initial_parent
+            .children
+            .iter()
+            .find(|node| node.path == child.canonicalize().unwrap())
+            .unwrap();
+        assert_eq!(initial_child.state, NodeState::Partial);
+        assert_eq!(initial_child.size, 0);
+
+        driver.discover_precise_and_cache(&child, &config).unwrap();
+        let listing = driver
+            .get_directory(volume.path(), &parent, &config)
+            .unwrap();
+
+        let child_node = listing
+            .children
+            .iter()
+            .find(|node| node.path == child.canonicalize().unwrap())
+            .unwrap();
+        assert_eq!(child_node.state, NodeState::Complete);
+        assert!(child_node.size > 0);
+        assert_eq!(listing.total_measured_size, child_node.size);
     }
 
     #[test]

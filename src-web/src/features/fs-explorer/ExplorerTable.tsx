@@ -78,7 +78,11 @@ export function ExplorerTable({
                 >
                   <TableCell>
                     <span className="flex min-w-0 items-center gap-2">
-                      {node.kind === "directory" ? <Folder data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
+                      {node.kind === "directory" ? (
+                        <Folder data-icon="inline-start" className="size-3.5" />
+                      ) : (
+                        <FileIcon data-icon="inline-start" className="size-3.5 opacity-50" />
+                      )}
                       <span title={node.name}>{truncateMiddle(node.name, NAME_MAX_LENGTH)}</span>
                     </span>
                   </TableCell>
@@ -153,7 +157,7 @@ function volumeSortValue(volume: DriveDto, column: SortColumn) {
 function nodeSortValue(node: PathNodeDto, column: SortColumn) {
   switch (column) {
     case "size":
-      return { complete: node.state === "complete", value: node.size }
+      return { complete: node.state === "complete", value: node.logicalSize }
     case "name":
       return node.name
   }
@@ -193,7 +197,7 @@ function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
   }
 
   if (node.state !== "complete") return ""
-  return formatBytes(node.size)
+  return formatBytes(node.logicalSize)
 }
 
 function truncateMiddle(value: string, maxLength: number) {
@@ -216,9 +220,11 @@ function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB", "TB"]
   let value = bytes
   let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000
     unit += 1
   }
-  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`
+
+  const maximumFractionDigits = unit === 0 ? 0 : 2
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value)} ${units[unit]}`
 }

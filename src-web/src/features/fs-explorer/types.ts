@@ -27,6 +27,7 @@ export type ScanConfigDto = {
   minVisibleFolderBytes?: number | null
   stayOnFilesystem?: boolean
   followSymlinks?: boolean
+  dedupeHardLinks?: boolean
 }
 
 export type ScanIssueDto = {
@@ -119,4 +120,5 @@ export const defaultScanConfig: ScanConfigDto = {
   minVisibleFolderBytes: null,
   stayOnFilesystem: true,
   followSymlinks: false,
+  dedupeHardLinks: false,
 }
