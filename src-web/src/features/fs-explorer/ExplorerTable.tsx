@@ -22,7 +22,7 @@ export function ExplorerTable({
   const rows = listing?.children ?? []
 
   return (
-    <div className="min-h-0 overflow-auto rounded-md border">
+    <div className="min-h-0 flex-1 overflow-auto rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
