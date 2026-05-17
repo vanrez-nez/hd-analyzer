@@ -24,7 +24,7 @@ export type ScanConfigDto = {
   preloadDepth?: number
   showHidden?: boolean
   expandAboveBytes?: number
-  minVisibleFolderBytes?: number
+  minVisibleFolderBytes?: number | null
   stayOnFilesystem?: boolean
   followSymlinks?: boolean
 }
@@ -115,7 +115,7 @@ export const defaultScanConfig: ScanConfigDto = {
   preloadDepth: 1,
   showHidden: false,
   expandAboveBytes: 1_000_000_000,
-  minVisibleFolderBytes: undefined,
+  minVisibleFolderBytes: null,
   stayOnFilesystem: true,
   followSymlinks: false,
 }

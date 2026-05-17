@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "log:default",
     "macos-permissions:allow-check-full-disk-access-permission",
     "macos-permissions:allow-request-full-disk-access-permission"
   ]

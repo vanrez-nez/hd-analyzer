@@ -141,6 +141,24 @@ pub struct DirectoryListing {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectorySizeSummary {
+    pub path: PathBuf,
+    pub config_fingerprint: String,
+    pub allocated_size: u64,
+    pub logical_size: u64,
+    pub has_visible_children: bool,
+    pub issues: Vec<ScanIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreciseDirectoryScan {
+    pub listing: DirectoryListing,
+    pub summaries: Vec<DirectorySizeSummary>,
+}
+
 #[derive(Debug, Clone)]
 pub struct OpenPathRequest {
     pub volume_root: PathBuf,
@@ -260,17 +278,67 @@ impl LocalHdDriver {
         path: &Path,
         config: &ScanConfig,
     ) -> DriverResult<DirectoryListing> {
-        let listing =
+        let mut listing =
             crate::scan::discover_directory(path, config).map_err(|source| DriverError::Io {
                 path: path.to_path_buf(),
                 source,
             })?;
+        self.enrich_listing_from_cached_summaries(&mut listing);
         let entry = self
             .cache
             .lock()
             .expect("directory cache poisoned")
             .upsert(listing, CacheFreshness::Fresh);
         Ok(entry.listing)
+    }
+
+    fn discover_precise_and_cache(
+        &self,
+        path: &Path,
+        config: &ScanConfig,
+    ) -> DriverResult<DirectoryListing> {
+        let precise =
+            crate::scan::discover_directory_with_precise_sizes(path, config).map_err(|source| {
+                DriverError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
+        let entry = self
+            .cache
+            .lock()
+            .expect("directory cache poisoned")
+            .upsert_precise(precise, CacheFreshness::Fresh);
+        Ok(entry.listing)
+    }
+
+    fn enrich_listing_from_cached_summaries(&self, listing: &mut DirectoryListing) {
+        let mut total_visible_size = 0u64;
+        let mut total_measured_size = 0u64;
+        let mut has_more_depth = false;
+        let cache = self.cache.lock().expect("directory cache poisoned");
+
+        for child in &mut listing.children {
+            if child.kind == EntryKind::Directory {
+                if let Some(summary) = cache.get_summary(&child.path, &listing.config_fingerprint) {
+                    child.size = summary.allocated_size;
+                    child.logical_size = summary.logical_size;
+                    child.state = NodeState::Complete;
+                    child.children_known = !summary.has_visible_children;
+                    child.issues = summary.issues;
+                }
+            }
+
+            total_measured_size = total_measured_size.saturating_add(child.size);
+            if child.visible {
+                total_visible_size = total_visible_size.saturating_add(child.size);
+            }
+            has_more_depth |= !child.children_known;
+        }
+
+        listing.total_visible_size = total_visible_size;
+        listing.total_measured_size = total_measured_size;
+        listing.has_more_depth = has_more_depth;
     }
 
     fn scoped_existing_path(&self, volume_root: &Path, path: &Path) -> DriverResult<PathBuf> {
@@ -371,7 +439,7 @@ impl HdDriver for LocalHdDriver {
                 });
             }
 
-            let result = driver.discover_and_cache(&handle.root_path, &config);
+            let result = driver.discover_precise_and_cache(&handle.root_path, &config);
             match result {
                 Ok(listing) => {
                     driver.jobs.set_state(&handle.job_id, JobState::Completed);
@@ -541,6 +609,36 @@ mod tests {
             .unwrap();
 
         assert_eq!(listing.path, child.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn child_listing_reuses_precise_descendant_size_summaries() {
+        let volume = tempdir().unwrap();
+        let top = volume.path().join("top");
+        let nested = top.join("nested");
+        let deep = nested.join("deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("file.txt"), b"abc").unwrap();
+        let driver = LocalHdDriver::new();
+        let config = ScanConfig {
+            requested_depth: 2,
+            preload_depth: 1,
+            min_visible_folder_bytes: None,
+            ..ScanConfig::default()
+        };
+
+        driver
+            .discover_precise_and_cache(volume.path(), &config)
+            .unwrap();
+        let listing = driver.get_directory(volume.path(), &top, &config).unwrap();
+
+        let nested_node = listing
+            .children
+            .iter()
+            .find(|node| node.path == nested.canonicalize().unwrap())
+            .unwrap();
+        assert_eq!(nested_node.state, NodeState::Complete);
+        assert!(nested_node.size > 0);
     }
 
     #[test]

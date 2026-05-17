@@ -62,7 +62,11 @@ export function FsExplorer() {
       try {
         const listing = await fsOpenPath(path, volumeRoot, defaultScanConfig)
         mergeListing(listing)
-        await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress)
+        if (listingNeedsScan(listing)) {
+          await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress)
+        } else {
+          setLoadingPath(undefined)
+        }
       } catch (error) {
         setError(error instanceof Error ? error.message : String(error))
         setLoadingPath(undefined)
@@ -110,4 +114,8 @@ export function FsExplorer() {
       />
     </section>
   )
+}
+
+function listingNeedsScan(listing: DirectoryListingDto) {
+  return listing.children.some((node) => node.kind === "directory" && node.state !== "complete")
 }

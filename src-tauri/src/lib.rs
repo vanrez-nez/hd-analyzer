@@ -8,12 +8,29 @@ use commands::{
     list_drives, rescan_subtree, start_scan,
 };
 use state::AppState;
+use tauri_plugin_log::{Target, TargetKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let log_level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log_level)
+                .target(Target::new(TargetKind::Webview))
+                .build(),
+        )
         .plugin(tauri_plugin_macos_permissions::init())
         .manage(AppState::default())
+        .setup(|_app| {
+            log::info!("HD Analyzer Tauri runtime initialized");
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_drives,
             fs_list_volumes,

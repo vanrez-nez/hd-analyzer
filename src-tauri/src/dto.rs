@@ -69,9 +69,7 @@ impl From<ScanConfigDto> for ScanConfig {
             preload_depth: dto.preload_depth.unwrap_or(default.preload_depth),
             show_hidden: dto.show_hidden.unwrap_or(default.show_hidden),
             expand_above_bytes: dto.expand_above_bytes.or(default.expand_above_bytes),
-            min_visible_folder_bytes: dto
-                .min_visible_folder_bytes
-                .or(default.min_visible_folder_bytes),
+            min_visible_folder_bytes: dto.min_visible_folder_bytes,
             stay_on_filesystem: dto.stay_on_filesystem.unwrap_or(default.stay_on_filesystem),
             follow_symlinks: dto.follow_symlinks.unwrap_or(default.follow_symlinks),
         }
@@ -560,5 +558,22 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
 
         assert!(json.contains("jobQueued"));
+    }
+
+    #[test]
+    fn supplied_scan_config_can_disable_min_visible_folder_filter() {
+        let dto: ScanConfigDto = serde_json::from_value(serde_json::json!({
+            "requestedDepth": 2,
+            "preloadDepth": 1,
+            "showHidden": false,
+            "expandAboveBytes": 1_000_000_000u64,
+            "stayOnFilesystem": true,
+            "followSymlinks": false
+        }))
+        .unwrap();
+
+        let config = ScanConfig::from(dto);
+
+        assert_eq!(config.min_visible_folder_bytes, None);
     }
 }

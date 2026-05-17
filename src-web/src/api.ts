@@ -4,6 +4,7 @@ import {
   requestFullDiskAccessPermission,
 } from "tauri-plugin-macos-permissions-api"
 import { Channel } from "@tauri-apps/api/core"
+import { appLog } from "@/lib/logging"
 
 import type {
   DirectoryListingDto,
@@ -53,48 +54,62 @@ export type PermissionCheckDto = {
 }
 
 export async function listDrives(): Promise<DriveDto[]> {
-  return invoke<DriveDto[]>("list_drives")
+  return invokeLogged<DriveDto[]>("list_drives")
 }
 
 export async function checkPermissions(root?: string): Promise<PermissionCheckDto> {
-  return invoke<PermissionCheckDto>("check_permissions", { root })
+  return invokeLogged<PermissionCheckDto>("check_permissions", { root })
 }
 
 export async function checkMacFilePermissions(): Promise<PermissionCheckDto> {
-  const granted = await checkFullDiskAccessPermission()
-  return {
-    granted,
-    message: granted ? "File permissions are enabled." : "File permissions are required before scanning.",
+  await appLog.debug("macOS full disk access permission check started")
+  try {
+    const granted = await checkFullDiskAccessPermission()
+    await appLog.info("macOS full disk access permission check completed", { granted })
+    return {
+      granted,
+      message: granted ? "File permissions are enabled." : "File permissions are required before scanning.",
+    }
+  } catch (error) {
+    await appLog.error("macOS full disk access permission check failed", { error })
+    throw error
   }
 }
 
 export async function requestMacFilePermissions(): Promise<PermissionCheckDto> {
-  await requestFullDiskAccessPermission()
-  return checkMacFilePermissions()
+  await appLog.info("macOS full disk access permission request started")
+  try {
+    await requestFullDiskAccessPermission()
+    await appLog.info("macOS full disk access permission request completed")
+    return checkMacFilePermissions()
+  } catch (error) {
+    await appLog.error("macOS full disk access permission request failed", { error })
+    throw error
+  }
 }
 
 export async function startScan(root: string): Promise<ScanSessionDto> {
-  return invoke<ScanSessionDto>("start_scan", { root })
+  return invokeLogged<ScanSessionDto>("start_scan", { root })
 }
 
 export async function getScanSession(sessionId: string): Promise<ScanSessionDto> {
-  return invoke<ScanSessionDto>("get_scan_session", { sessionId })
+  return invokeLogged<ScanSessionDto>("get_scan_session", { sessionId })
 }
 
 export async function listDirectoryEntries(sessionId: string, path: string): Promise<DirectoryEntryDto[]> {
-  return invoke<DirectoryEntryDto[]>("list_directory_entries", { sessionId, path })
+  return invokeLogged<DirectoryEntryDto[]>("list_directory_entries", { sessionId, path })
 }
 
 export async function rescanSubtree(sessionId: string, path: string): Promise<ScanSessionDto> {
-  return invoke<ScanSessionDto>("rescan_subtree", { sessionId, path })
+  return invokeLogged<ScanSessionDto>("rescan_subtree", { sessionId, path })
 }
 
 export async function getReadErrors(sessionId: string): Promise<ReadErrorDto[]> {
-  return invoke<ReadErrorDto[]>("get_read_errors", { sessionId })
+  return invokeLogged<ReadErrorDto[]>("get_read_errors", { sessionId })
 }
 
 export async function fsListVolumes(): Promise<FsDriveDto[]> {
-  return invoke<FsDriveDto[]>("fs_list_volumes")
+  return invokeLogged<FsDriveDto[]>("fs_list_volumes")
 }
 
 export async function fsOpenPath(
@@ -102,7 +117,7 @@ export async function fsOpenPath(
   volumeRoot: string,
   config?: ScanConfigDto,
 ): Promise<DirectoryListingDto> {
-  return invoke<DirectoryListingDto>("fs_open_path", { path, volumeRoot, config })
+  return invokeLogged<DirectoryListingDto>("fs_open_path", { path, volumeRoot, config })
 }
 
 export async function fsGetDirectory(
@@ -110,7 +125,7 @@ export async function fsGetDirectory(
   volumeRoot: string,
   config?: ScanConfigDto,
 ): Promise<DirectoryListingDto> {
-  return invoke<DirectoryListingDto>("fs_get_directory", { path, volumeRoot, config })
+  return invokeLogged<DirectoryListingDto>("fs_get_directory", { path, volumeRoot, config })
 }
 
 export async function fsStartScan(
@@ -121,7 +136,7 @@ export async function fsStartScan(
 ): Promise<StartScanReceiptDto> {
   const progressChannel = new Channel<FsProgressEvent>()
   progressChannel.onmessage = onProgress
-  return invoke<StartScanReceiptDto>("fs_start_scan", {
+  return invokeLogged<StartScanReceiptDto>("fs_start_scan", {
     path,
     volumeRoot,
     config,
@@ -131,9 +146,21 @@ export async function fsStartScan(
 }
 
 export async function fsInvalidatePath(path: string, volumeRoot: string): Promise<InvalidationReceiptDto> {
-  return invoke<InvalidationReceiptDto>("fs_invalidate_path", {
+  return invokeLogged<InvalidationReceiptDto>("fs_invalidate_path", {
     path,
     volumeRoot,
     scope: "path_and_descendants",
   })
+}
+
+async function invokeLogged<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  await appLog.debug(`ipc ${command} started`)
+  try {
+    const result = await invoke<T>(command, args)
+    await appLog.debug(`ipc ${command} completed`)
+    return result
+  } catch (error) {
+    await appLog.error(`ipc ${command} failed`, { error })
+    throw error
+  }
 }

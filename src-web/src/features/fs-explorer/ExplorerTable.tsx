@@ -62,7 +62,7 @@ export function ExplorerTable({
                     </span>
                   </TableCell>
                   <TableCell>{node.kind}</TableCell>
-                  <TableCell className="text-right">{node.size > 0 ? formatBytes(node.size) : ""}</TableCell>
+                  <TableCell className="text-right">{formatNodeSize(node)}</TableCell>
                   <TableCell>
                     <span className="flex items-center gap-2">
                       {isWorking(node.state) || loadingPath === node.path ? <Spinner /> : null}
@@ -79,6 +79,11 @@ export function ExplorerTable({
 
 function isWorking(state: string) {
   return state === "queued" || state === "working" || state === "partial" || state === "stale"
+}
+
+function formatNodeSize(node: PathNodeDto) {
+  if (node.state !== "complete") return ""
+  return formatBytes(node.size)
 }
 
 function formatBytes(bytes: number) {
