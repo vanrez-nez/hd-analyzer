@@ -134,6 +134,7 @@ pub struct DirectoryListing {
     pub children: Vec<PathNode>,
     pub total_visible_size: u64,
     pub total_measured_size: u64,
+    pub total_logical_size: u64,
     pub state: NodeState,
     pub loaded_depth: usize,
     pub has_more_depth: bool,
@@ -313,31 +314,42 @@ impl LocalHdDriver {
     }
 
     fn enrich_listing_from_cached_summaries(&self, listing: &mut DirectoryListing) {
-        let mut total_visible_size = 0u64;
-        let mut total_measured_size = 0u64;
+        let mut total_visible_size = listing.total_visible_size;
+        let mut total_measured_size = listing.total_measured_size;
+        let mut total_logical_size = listing.total_logical_size;
         let mut has_more_depth = false;
         let cache = self.cache.lock().expect("directory cache poisoned");
 
         for child in &mut listing.children {
             if child.kind == EntryKind::Directory {
                 if let Some(summary) = cache.get_summary(&child.path, &listing.config_fingerprint) {
+                    let previous_size = child.size;
+                    let previous_logical_size = child.logical_size;
                     child.size = summary.allocated_size;
                     child.logical_size = summary.logical_size;
                     child.state = NodeState::Complete;
                     child.children_known = !summary.has_visible_children;
                     child.issues = summary.issues;
+                    total_measured_size =
+                        adjusted_total(total_measured_size, previous_size, child.size);
+                    total_logical_size = adjusted_total(
+                        total_logical_size,
+                        previous_logical_size,
+                        child.logical_size,
+                    );
+                    if child.visible {
+                        total_visible_size =
+                            adjusted_total(total_visible_size, previous_size, child.size);
+                    }
                 }
             }
 
-            total_measured_size = total_measured_size.saturating_add(child.size);
-            if child.visible {
-                total_visible_size = total_visible_size.saturating_add(child.size);
-            }
             has_more_depth |= !child.children_known;
         }
 
         listing.total_visible_size = total_visible_size;
         listing.total_measured_size = total_measured_size;
+        listing.total_logical_size = total_logical_size;
         listing.has_more_depth = has_more_depth;
     }
 
@@ -515,6 +527,14 @@ impl HdDriver for LocalHdDriver {
     }
 }
 
+fn adjusted_total(total: u64, previous_value: u64, next_value: u64) -> u64 {
+    if next_value >= previous_value {
+        total.saturating_add(next_value - previous_value)
+    } else {
+        total.saturating_sub(previous_value - next_value)
+    }
+}
+
 fn canonicalize_volume_root(volume_root: &Path) -> DriverResult<PathBuf> {
     volume_root
         .canonicalize()
@@ -585,6 +605,32 @@ mod tests {
     }
 
     #[test]
+    fn open_path_preserves_hidden_direct_totals_when_rows_are_omitted() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden"), b"abc").unwrap();
+        std::fs::write(dir.path().join("visible"), b"abc").unwrap();
+        let driver = LocalHdDriver::new();
+
+        let listing = driver
+            .open_path(OpenPathRequest {
+                volume_root: dir.path().to_path_buf(),
+                path: dir.path().to_path_buf(),
+                config: ScanConfig {
+                    min_visible_folder_bytes: None,
+                    show_hidden: false,
+                    ..ScanConfig::default()
+                },
+                request_id: "test".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(listing.children.len(), 1);
+        assert_eq!(listing.children[0].name, "visible");
+        assert!(listing.total_measured_size > listing.total_visible_size);
+        assert!(listing.total_logical_size > listing.children[0].logical_size);
+    }
+
+    #[test]
     fn rejects_parent_path_outside_volume_root() {
         let volume = tempdir().unwrap();
         let outside = tempdir().unwrap();
@@ -639,6 +685,38 @@ mod tests {
             .unwrap();
         assert_eq!(nested_node.state, NodeState::Complete);
         assert!(nested_node.size > 0);
+    }
+
+    #[test]
+    fn child_listing_reuses_hidden_inclusive_precise_descendant_size_summaries() {
+        let volume = tempdir().unwrap();
+        let top = volume.path().join("top");
+        let nested = top.join("nested");
+        let hidden = nested.join(".hidden");
+        std::fs::create_dir_all(&hidden).unwrap();
+        std::fs::write(hidden.join("file.txt"), b"abc").unwrap();
+        let driver = LocalHdDriver::new();
+        let config = ScanConfig {
+            requested_depth: 2,
+            preload_depth: 1,
+            min_visible_folder_bytes: None,
+            show_hidden: false,
+            ..ScanConfig::default()
+        };
+
+        driver
+            .discover_precise_and_cache(volume.path(), &config)
+            .unwrap();
+        let listing = driver.get_directory(volume.path(), &top, &config).unwrap();
+
+        let nested_node = listing
+            .children
+            .iter()
+            .find(|node| node.path == nested.canonicalize().unwrap())
+            .unwrap();
+        assert_eq!(nested_node.state, NodeState::Complete);
+        assert!(nested_node.size > 0);
+        assert!(!listing.children.iter().any(|node| node.name == ".hidden"));
     }
 
     #[test]

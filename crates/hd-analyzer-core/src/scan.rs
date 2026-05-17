@@ -298,6 +298,7 @@ fn discover_directory_inner(
     let mut issues = Vec::new();
     let mut total_visible_size = 0u64;
     let mut total_measured_size = 0u64;
+    let mut total_logical_size = 0u64;
     let mut has_more_depth = false;
 
     let root_device = if config.stay_on_filesystem {
@@ -336,24 +337,18 @@ fn discover_directory_inner(
 
         let entry_path = entry.path();
         let name = entry.file_name.to_string_lossy().into_owned();
-
-        if config.is_hidden_name(&name) {
-            issues.push(ScanIssue {
-                path: entry_path,
-                kind: ReadIssueKind::HiddenSkipped,
-                message: "Hidden entry skipped by scan configuration.".to_string(),
-            });
-            continue;
-        }
+        let is_visible_by_config = !config.is_hidden_name(&name);
 
         let file_type = entry.file_type;
 
         if entry.path_is_symlink() && !config.follow_symlinks {
-            issues.push(ScanIssue {
-                path: entry_path,
-                kind: ReadIssueKind::SymlinkSkipped,
-                message: "Symlink skipped by scan configuration.".to_string(),
-            });
+            if is_visible_by_config {
+                issues.push(ScanIssue {
+                    path: entry_path,
+                    kind: ReadIssueKind::SymlinkSkipped,
+                    message: "Symlink skipped by scan configuration.".to_string(),
+                });
+            }
             continue;
         }
 
@@ -364,11 +359,13 @@ fn discover_directory_inner(
                     use std::os::unix::fs::MetadataExt;
                     if let Ok(metadata) = entry.metadata() {
                         if metadata.dev() != root_device {
-                            issues.push(ScanIssue {
-                                path: entry_path,
-                                kind: ReadIssueKind::FilesystemBoundary,
-                                message: "Directory is on a different filesystem.".to_string(),
-                            });
+                            if is_visible_by_config {
+                                issues.push(ScanIssue {
+                                    path: entry_path,
+                                    kind: ReadIssueKind::FilesystemBoundary,
+                                    message: "Directory is on a different filesystem.".to_string(),
+                                });
+                            }
                             continue;
                         }
                     }
@@ -379,8 +376,9 @@ fn discover_directory_inner(
                 measure_directory_node(root, &entry_path, config, depth + 1, dedupe);
             issues.extend(node_issues.clone());
             total_measured_size = total_measured_size.saturating_add(size);
+            total_logical_size = total_logical_size.saturating_add(logical_size);
 
-            if config.should_show_folder(size) {
+            if is_visible_by_config && config.should_show_folder(size) {
                 total_visible_size = total_visible_size.saturating_add(size);
                 has_more_depth |= !children_known;
                 children.push(PathNode {
@@ -404,22 +402,26 @@ fn discover_directory_inner(
                     let measurement = dedupe.measure_file(&entry_path, &metadata);
                     total_measured_size =
                         total_measured_size.saturating_add(measurement.allocated_bytes);
-                    total_visible_size =
-                        total_visible_size.saturating_add(measurement.allocated_bytes);
-                    children.push(PathNode {
-                        path: entry_path,
-                        name,
-                        kind: EntryKind::File,
-                        parent_path: Some(path.to_path_buf()),
-                        depth_from_request: depth + 1,
-                        size: measurement.allocated_bytes,
-                        logical_size: measurement.logical_bytes,
-                        state: NodeState::Complete,
-                        visible: true,
-                        children_known: true,
-                        active_job_id: None,
-                        issues: Vec::new(),
-                    });
+                    total_logical_size =
+                        total_logical_size.saturating_add(measurement.logical_bytes);
+                    if is_visible_by_config {
+                        total_visible_size =
+                            total_visible_size.saturating_add(measurement.allocated_bytes);
+                        children.push(PathNode {
+                            path: entry_path,
+                            name,
+                            kind: EntryKind::File,
+                            parent_path: Some(path.to_path_buf()),
+                            depth_from_request: depth + 1,
+                            size: measurement.allocated_bytes,
+                            logical_size: measurement.logical_bytes,
+                            state: NodeState::Complete,
+                            visible: true,
+                            children_known: true,
+                            active_job_id: None,
+                            issues: Vec::new(),
+                        });
+                    }
                 }
                 Err(error) => issues.push(ScanIssue {
                     path: entry_path,
@@ -443,6 +445,7 @@ fn discover_directory_inner(
         children,
         total_visible_size,
         total_measured_size,
+        total_logical_size,
         state: NodeState::Complete,
         loaded_depth: config.preload_depth.min(config.requested_depth),
         has_more_depth,
@@ -464,7 +467,8 @@ fn measure_directory_node(
 
     match discover_directory_inner(root, path, config, depth, dedupe) {
         Ok(listing) => {
-            let measurement = directory_measurement(listing.total_measured_size, 0);
+            let measurement =
+                directory_measurement(listing.total_measured_size, listing.total_logical_size);
             let should_expand = config.should_expand_folder(measurement.allocated_bytes, depth);
             let has_deferred_descendants = listing.has_more_depth;
             let children_known =
@@ -520,6 +524,7 @@ fn discover_directory_precise_inner(
     let mut summaries = Vec::new();
     let mut total_visible_size = 0u64;
     let mut total_measured_size = 0u64;
+    let mut total_logical_size = 0u64;
     let mut has_more_depth = false;
 
     for entry_result in direct_entries(path, config) {
@@ -533,42 +538,39 @@ fn discover_directory_precise_inner(
 
         let entry_path = entry.path();
         let name = entry.file_name.to_string_lossy().into_owned();
-
-        if config.is_hidden_name(&name) {
-            issues.push(ScanIssue {
-                path: entry_path,
-                kind: ReadIssueKind::HiddenSkipped,
-                message: "Hidden entry skipped by scan configuration.".to_string(),
-            });
-            continue;
-        }
+        let is_visible_by_config = !config.is_hidden_name(&name);
 
         if entry.path_is_symlink() && !config.follow_symlinks {
-            issues.push(ScanIssue {
-                path: entry_path,
-                kind: ReadIssueKind::SymlinkSkipped,
-                message: "Symlink skipped by scan configuration.".to_string(),
-            });
+            if is_visible_by_config {
+                issues.push(ScanIssue {
+                    path: entry_path,
+                    kind: ReadIssueKind::SymlinkSkipped,
+                    message: "Symlink skipped by scan configuration.".to_string(),
+                });
+            }
             continue;
         }
 
         let file_type = entry.file_type;
         if file_type.is_dir() {
             if crosses_filesystem_boundary(&entry, root_device) {
-                issues.push(ScanIssue {
-                    path: entry_path,
-                    kind: ReadIssueKind::FilesystemBoundary,
-                    message: "Directory is on a different filesystem.".to_string(),
-                });
+                if is_visible_by_config {
+                    issues.push(ScanIssue {
+                        path: entry_path,
+                        kind: ReadIssueKind::FilesystemBoundary,
+                        message: "Directory is on a different filesystem.".to_string(),
+                    });
+                }
                 continue;
             }
 
             let measurement = measure_directory_tree(&entry_path, config, dedupe, root_device);
             total_measured_size = total_measured_size.saturating_add(measurement.allocated_bytes);
+            total_logical_size = total_logical_size.saturating_add(measurement.logical_bytes);
             issues.extend(measurement.issues.clone());
             summaries.extend(measurement.summaries.clone());
 
-            if config.should_show_folder(measurement.allocated_bytes) {
+            if is_visible_by_config && config.should_show_folder(measurement.allocated_bytes) {
                 total_visible_size = total_visible_size.saturating_add(measurement.allocated_bytes);
                 has_more_depth |= measurement.has_visible_children;
                 children.push(PathNode {
@@ -592,22 +594,26 @@ fn discover_directory_precise_inner(
                     let measurement = dedupe.measure_file(&entry_path, &metadata);
                     total_measured_size =
                         total_measured_size.saturating_add(measurement.allocated_bytes);
-                    total_visible_size =
-                        total_visible_size.saturating_add(measurement.allocated_bytes);
-                    children.push(PathNode {
-                        path: entry_path,
-                        name,
-                        kind: EntryKind::File,
-                        parent_path: Some(path.to_path_buf()),
-                        depth_from_request: 1,
-                        size: measurement.allocated_bytes,
-                        logical_size: measurement.logical_bytes,
-                        state: NodeState::Complete,
-                        visible: true,
-                        children_known: true,
-                        active_job_id: None,
-                        issues: Vec::new(),
-                    });
+                    total_logical_size =
+                        total_logical_size.saturating_add(measurement.logical_bytes);
+                    if is_visible_by_config {
+                        total_visible_size =
+                            total_visible_size.saturating_add(measurement.allocated_bytes);
+                        children.push(PathNode {
+                            path: entry_path,
+                            name,
+                            kind: EntryKind::File,
+                            parent_path: Some(path.to_path_buf()),
+                            depth_from_request: 1,
+                            size: measurement.allocated_bytes,
+                            logical_size: measurement.logical_bytes,
+                            state: NodeState::Complete,
+                            visible: true,
+                            children_known: true,
+                            active_job_id: None,
+                            issues: Vec::new(),
+                        });
+                    }
                 }
                 Err(error) => issues.push(ScanIssue {
                     path: entry_path,
@@ -631,6 +637,7 @@ fn discover_directory_precise_inner(
         children,
         total_visible_size,
         total_measured_size,
+        total_logical_size,
         state: NodeState::Complete,
         loaded_depth: 1.min(config.requested_depth),
         has_more_depth,
@@ -660,37 +667,35 @@ fn measure_directory_tree(
 
         let entry_path = entry.path();
         let name = entry.file_name.to_string_lossy().into_owned();
-
-        if config.is_hidden_name(&name) {
-            measurement.issues.push(ScanIssue {
-                path: entry_path,
-                kind: ReadIssueKind::HiddenSkipped,
-                message: "Hidden entry skipped by scan configuration.".to_string(),
-            });
-            continue;
-        }
+        let is_visible_by_config = !config.is_hidden_name(&name);
 
         if entry.path_is_symlink() && !config.follow_symlinks {
-            measurement.issues.push(ScanIssue {
-                path: entry_path,
-                kind: ReadIssueKind::SymlinkSkipped,
-                message: "Symlink skipped by scan configuration.".to_string(),
-            });
+            if is_visible_by_config {
+                measurement.issues.push(ScanIssue {
+                    path: entry_path,
+                    kind: ReadIssueKind::SymlinkSkipped,
+                    message: "Symlink skipped by scan configuration.".to_string(),
+                });
+            }
             continue;
         }
 
         let file_type = entry.file_type;
         if file_type.is_dir() {
             if crosses_filesystem_boundary(&entry, root_device) {
-                measurement.issues.push(ScanIssue {
-                    path: entry_path,
-                    kind: ReadIssueKind::FilesystemBoundary,
-                    message: "Directory is on a different filesystem.".to_string(),
-                });
+                if is_visible_by_config {
+                    measurement.issues.push(ScanIssue {
+                        path: entry_path,
+                        kind: ReadIssueKind::FilesystemBoundary,
+                        message: "Directory is on a different filesystem.".to_string(),
+                    });
+                }
                 continue;
             }
 
-            measurement.has_visible_children = true;
+            if is_visible_by_config {
+                measurement.has_visible_children = true;
+            }
             let child = measure_directory_tree(&entry_path, config, dedupe, root_device);
             measurement.allocated_bytes = measurement
                 .allocated_bytes
@@ -703,7 +708,9 @@ fn measure_directory_tree(
         } else if file_type.is_file() {
             match entry.metadata() {
                 Ok(metadata) => {
-                    measurement.has_visible_children = true;
+                    if is_visible_by_config {
+                        measurement.has_visible_children = true;
+                    }
                     let file = dedupe.measure_file(&entry_path, &metadata);
                     measurement.allocated_bytes = measurement
                         .allocated_bytes
@@ -825,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn discover_directory_filters_hidden_entries_by_default() {
+    fn discover_directory_counts_hidden_entries_without_emitting_rows_by_default() {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join(".hidden"), b"abc").unwrap();
         std::fs::write(dir.path().join("visible"), b"abc").unwrap();
@@ -840,7 +847,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(listing.children.len(), 1);
-        assert_eq!(listing.issues.len(), 1);
+        assert_eq!(listing.children[0].name, "visible");
+        assert!(listing.total_measured_size > listing.total_visible_size);
+        assert!(listing.total_logical_size > listing.children[0].logical_size);
+        assert!(listing.issues.is_empty());
     }
 
     #[test]
@@ -916,6 +926,89 @@ mod tests {
             .unwrap();
         assert_eq!(top_node.state, NodeState::Complete);
         assert!(top_node.size > 0);
+    }
+
+    #[test]
+    fn precise_directory_discovery_counts_hidden_subtrees_without_emitting_rows() {
+        let dir = tempdir().unwrap();
+        let visible = dir.path().join("visible");
+        let hidden = visible.join(".cache");
+        std::fs::create_dir_all(&hidden).unwrap();
+        std::fs::write(hidden.join("data.bin"), b"hidden data").unwrap();
+
+        let config = ScanConfig {
+            min_visible_folder_bytes: None,
+            ..ScanConfig::default()
+        };
+        let root_listing = discover_directory_with_precise_sizes(dir.path(), &config)
+            .unwrap()
+            .listing;
+        let visible_node = root_listing
+            .children
+            .iter()
+            .find(|node| node.name == "visible")
+            .unwrap();
+
+        assert!(visible_node.size > 0);
+        assert!(visible_node.logical_size > 0);
+
+        let visible_listing = discover_directory_with_precise_sizes(&visible, &config)
+            .unwrap()
+            .listing;
+
+        assert!(visible_listing.children.is_empty());
+        assert!(visible_listing.total_measured_size > 0);
+        assert!(visible_listing.total_logical_size > 0);
+        assert_eq!(visible_listing.total_visible_size, 0);
+    }
+
+    #[test]
+    fn precise_directory_discovery_keeps_totals_stable_when_hidden_rows_are_shown() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".hidden"), b"abc").unwrap();
+        std::fs::write(dir.path().join("visible"), b"abc").unwrap();
+
+        let hidden_rows_omitted = discover_directory_with_precise_sizes(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                show_hidden: false,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap()
+        .listing;
+        let hidden_rows_shown = discover_directory_with_precise_sizes(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                show_hidden: true,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap()
+        .listing;
+
+        assert_eq!(
+            hidden_rows_omitted.total_measured_size,
+            hidden_rows_shown.total_measured_size
+        );
+        assert_eq!(
+            hidden_rows_omitted.total_logical_size,
+            hidden_rows_shown.total_logical_size
+        );
+        assert!(
+            !hidden_rows_omitted
+                .children
+                .iter()
+                .any(|node| node.name == ".hidden")
+        );
+        assert!(
+            hidden_rows_shown
+                .children
+                .iter()
+                .any(|node| node.name == ".hidden")
+        );
     }
 
     #[test]

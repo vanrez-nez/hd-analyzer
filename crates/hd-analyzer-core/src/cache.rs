@@ -152,6 +152,7 @@ mod tests {
             children: Vec::new(),
             total_visible_size: 0,
             total_measured_size: 0,
+            total_logical_size: 0,
             state: NodeState::Complete,
             loaded_depth: 1,
             has_more_depth: false,

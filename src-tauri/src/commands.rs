@@ -81,10 +81,11 @@ pub fn fs_open_path(
     match state.fs_driver.open_path(request) {
         Ok(listing) => {
             log::info!(
-                "opened filesystem path {} with {} child node(s), total measured size {}",
+                "opened filesystem path {} with {} child node(s), total measured size {}, total logical size {}",
                 listing.path.display(),
                 listing.children.len(),
-                listing.total_measured_size
+                listing.total_measured_size,
+                listing.total_logical_size
             );
             Ok(DirectoryListingDto::from(&listing))
         }
@@ -138,10 +139,11 @@ pub fn fs_start_scan(
         match &event {
             hd_analyzer_core::DriverEvent::DirectoryReady { path, listing, .. } => {
                 log::info!(
-                    "filesystem scan produced listing for {} with {} child node(s), total measured size {}",
+                    "filesystem scan produced listing for {} with {} child node(s), total measured size {}, total logical size {}",
                     path.display(),
                     listing.children.len(),
-                    listing.total_measured_size
+                    listing.total_measured_size,
+                    listing.total_logical_size
                 );
             }
             hd_analyzer_core::DriverEvent::JobFinished { job_id, path, .. } => {

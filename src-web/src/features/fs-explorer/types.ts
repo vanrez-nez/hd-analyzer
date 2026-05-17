@@ -56,6 +56,7 @@ export type DirectoryListingDto = {
   children: PathNodeDto[]
   totalVisibleSize: number
   totalMeasuredSize: number
+  totalLogicalSize: number
   state: NodeState
   loadedDepth: number
   hasMoreDepth: boolean
