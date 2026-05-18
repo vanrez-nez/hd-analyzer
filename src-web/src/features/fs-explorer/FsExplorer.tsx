@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { ReactNode } from "react"
-import { RefreshCwIcon } from "lucide-react"
+import { PanelRightOpenIcon, RefreshCwIcon } from "lucide-react"
 
 import { fsListVolumes, fsOpenPath, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -24,11 +23,16 @@ import { defaultScanConfig } from "./types"
 type LiveDirectoryUpdates = Record<string, Record<string, DirectoryProgressUpdateDto>>
 
 type FsExplorerProps = {
-  headerActions?: ReactNode
   tableClassName?: string
+  visualizerOpen: boolean
+  onVisualizerToggle: () => void
 }
 
-export function FsExplorer({ headerActions, tableClassName }: FsExplorerProps) {
+export function FsExplorer({
+  tableClassName,
+  visualizerOpen,
+  onVisualizerToggle,
+}: FsExplorerProps) {
   const [volumes, setVolumes] = useState<DriveDto[]>([])
   const [selectedVolume, setSelectedVolume] = useState<DriveDto>()
   const [currentPath, setCurrentPath] = useState<string>()
@@ -231,27 +235,34 @@ export function FsExplorer({ headerActions, tableClassName }: FsExplorerProps) {
             onBackToRoot={returnToVolumes}
           />
         </div>
-        {canReloadCurrentPath || headerActions ? (
-          <ButtonGroup>
-            {canReloadCurrentPath ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label="Reload current path"
-                disabled={isReloadingCurrentPath}
-                onClick={() => void reloadCurrentPath()}
-              >
-                {isReloadingCurrentPath ? (
-                  <Spinner />
-                ) : (
-                  <RefreshCwIcon data-icon="inline-start" />
-                )}
-              </Button>
-            ) : null}
-            {headerActions}
-          </ButtonGroup>
-        ) : null}
+        <ButtonGroup>
+          {canReloadCurrentPath ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label="Reload current path"
+              disabled={isReloadingCurrentPath}
+              onClick={() => void reloadCurrentPath()}
+            >
+              {isReloadingCurrentPath ? (
+                <Spinner />
+              ) : (
+                <RefreshCwIcon data-icon="inline-start" />
+              )}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant={visualizerOpen ? "secondary" : "outline"}
+            size="icon-sm"
+            aria-label={visualizerOpen ? "Hide visualizer" : "Show visualizer"}
+            aria-pressed={visualizerOpen}
+            onClick={onVisualizerToggle}
+          >
+            <PanelRightOpenIcon data-icon="inline-start" />
+          </Button>
+        </ButtonGroup>
       </div>
       {scanProgress ? <ScanProgressBar snapshot={scanProgress} /> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
