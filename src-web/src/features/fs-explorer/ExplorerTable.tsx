@@ -6,8 +6,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils"
 import type { DeleteSafetyClassification, DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
 
-const NAME_MAX_LENGTH = 64
-
 type SortColumn = "name" | "size"
 type SortDirection = "asc" | "desc"
 type SortState = {
@@ -16,6 +14,7 @@ type SortState = {
 }
 
 type ExplorerTableProps = {
+  className?: string
   volumes: DriveDto[]
   listing?: DirectoryListingDto
   loadingPath?: string
@@ -24,6 +23,7 @@ type ExplorerTableProps = {
 }
 
 export function ExplorerTable({
+  className,
   volumes,
   listing,
   loadingPath,
@@ -43,65 +43,75 @@ export function ExplorerTable({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto overscroll-none rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <SortableHead column="name" sort={sort} onSort={toggleSort}>
+    <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border", className)}>
+      <Table className="block w-full">
+        <TableHeader className="block">
+          <TableRow className={tableRowClassName()}>
+            <SortableHead column="name" sort={sort} onSort={toggleSort} className="w-full max-w-0">
               Name
             </SortableHead>
-            <SortableHead column="size" sort={sort} onSort={toggleSort} className="w-36">
+            <SortableHead column="size" sort={sort} onSort={toggleSort} className="whitespace-nowrap text-right" align="right">
               Size
             </SortableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {!listing
-            ? (rows as DriveDto[]).map((volume) => (
-                <TableRow className="cursor-pointer select-none" key={volume.id} onClick={() => onOpenVolume(volume)}>
-                  <TableCell>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <HardDrive data-icon="inline-start" />
-                      <span title={volume.label}>{truncateMiddle(volume.label, NAME_MAX_LENGTH)}</span>
-                    </span>
-                  </TableCell>
-                  <TableCell>{formatBytes(volume.usedSpace)}</TableCell>
-                </TableRow>
-              ))
-            : (rows as PathNodeDto[]).map((node) => (
-                <TableRow
-                  className={node.kind === "directory" ? "cursor-pointer select-none" : "select-none"}
-                  key={node.path}
-                  title={node.deleteSafety?.reason}
-                  onClick={() => {
-                    if (node.kind === "directory") onOpenNode(node)
-                  }}
-                >
-                  <TableCell>
-                    <span className="flex min-w-0 items-center gap-2">
-                      {node.kind === "directory" ? (
-                        <Folder
-                          data-icon="inline-start"
-                          className={cn("size-3.5", safetyIconClass(node.deleteSafety?.classification))}
-                        />
-                      ) : (
-                        <FileIcon data-icon="inline-start" className="size-3.5 opacity-50" />
-                      )}
-                      <span
-                        className={node.kind === "directory" ? safetyTextClass(node.deleteSafety?.classification) : undefined}
-                        title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
-                      >
-                        {truncateMiddle(node.name, NAME_MAX_LENGTH)}
-                      </span>
-                    </span>
-                  </TableCell>
-                  <TableCell>{renderNodeSize(node, loadingPath)}</TableCell>
-                </TableRow>
-              ))}
-        </TableBody>
       </Table>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none">
+        <Table className="block w-full">
+          <TableBody className="block">
+            {!listing
+              ? (rows as DriveDto[]).map((volume) => (
+                  <TableRow className={tableRowClassName("cursor-pointer select-none")} key={volume.id} onClick={() => onOpenVolume(volume)}>
+                    <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
+                      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                        <HardDrive data-icon="inline-start" />
+                        <span className="truncate" title={volume.label}>
+                          {volume.label}
+                        </span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right">{formatBytes(volume.usedSpace)}</TableCell>
+                  </TableRow>
+                ))
+              : (rows as PathNodeDto[]).map((node) => (
+                  <TableRow
+                    className={tableRowClassName(node.kind === "directory" ? "cursor-pointer select-none" : "select-none")}
+                    key={node.path}
+                    title={node.deleteSafety?.reason}
+                    onClick={() => {
+                      if (node.kind === "directory") onOpenNode(node)
+                    }}
+                  >
+                    <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
+                      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                        {node.kind === "directory" ? (
+                          <Folder
+                            data-icon="inline-start"
+                            className={cn("size-3.5", safetyIconClass(node.deleteSafety?.classification))}
+                          />
+                        ) : (
+                          <FileIcon data-icon="inline-start" className="size-3.5 opacity-50" />
+                        )}
+                        <span
+                          className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
+                          title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
+                        >
+                          {node.name}
+                        </span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right">{renderNodeSize(node, loadingPath)}</TableCell>
+                  </TableRow>
+                ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
+}
+
+function tableRowClassName(className?: string) {
+  return cn("grid grid-cols-[minmax(0,1fr)_max-content]", className)
 }
 
 function safetyTextClass(classification?: DeleteSafetyClassification) {
@@ -137,6 +147,7 @@ function safetyIconClass(classification?: DeleteSafetyClassification) {
 }
 
 type SortableHeadProps = {
+  align?: "left" | "right"
   children: string
   className?: string
   column: SortColumn
@@ -144,7 +155,7 @@ type SortableHeadProps = {
   sort: SortState
 }
 
-function SortableHead({ children, className, column, onSort, sort }: SortableHeadProps) {
+function SortableHead({ align = "left", children, className, column, onSort, sort }: SortableHeadProps) {
   const active = sort.column === column
   const Icon = sort.direction === "asc" ? ArrowUpIcon : ArrowDownIcon
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTableCellElement>) => {
@@ -158,7 +169,7 @@ function SortableHead({ children, className, column, onSort, sort }: SortableHea
     <TableHead
       aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
       className={cn(
-        "sticky top-0 z-10 cursor-pointer select-none bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "cursor-pointer select-none whitespace-nowrap bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
       onClick={() => onSort(column)}
@@ -166,7 +177,7 @@ function SortableHead({ children, className, column, onSort, sort }: SortableHea
       role="button"
       tabIndex={0}
     >
-      <span className="inline-flex h-8 items-center gap-1.5 rounded-md">
+      <span className={cn("inline-flex h-8 items-center gap-1.5 rounded-md", align === "right" && "w-full justify-end")}>
         {children}
         {active ? <Icon data-icon="inline-end" className="size-3" /> : null}
       </span>
@@ -235,7 +246,7 @@ function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
     }
 
     return (
-      <span className="inline-flex">
+      <span className="inline-flex w-full justify-end">
         <Spinner />
       </span>
     )
@@ -243,21 +254,6 @@ function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
 
   if (node.state !== "complete") return ""
   return formatBytes(node.logicalSize)
-}
-
-function truncateMiddle(value: string, maxLength: number) {
-  if (value.length <= maxLength) {
-    return value
-  }
-
-  if (maxLength <= 3) {
-    return value.slice(0, Math.max(0, maxLength))
-  }
-
-  const available = maxLength - 3
-  const headLength = Math.ceil(available / 2)
-  const tailLength = Math.floor(available / 2)
-  return `${value.slice(0, headLength)}...${value.slice(value.length - tailLength)}`
 }
 
 function formatBytes(bytes: number) {

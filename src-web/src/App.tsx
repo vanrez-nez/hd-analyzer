@@ -2,7 +2,7 @@ import { useState } from "react"
 import { ShieldCheck } from "lucide-react"
 import { requestMacFilePermissions } from "./api"
 import { Button } from "@/components/ui/button"
-import { FsExplorer } from "@/features/fs-explorer/FsExplorer"
+import { Layout } from "@/features/visualizer/Layout"
 
 export function App() {
   const [permissionChecking, setPermissionChecking] = useState(false)
@@ -22,7 +22,7 @@ export function App() {
           Permissions
         </Button>
       </div>
-      <FsExplorer />
+      <Layout />
     </main>
   )
 }

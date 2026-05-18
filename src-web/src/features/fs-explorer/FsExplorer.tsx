@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
 import { fsListVolumes, fsOpenPath, fsStartScan } from "@/api"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
@@ -21,7 +23,12 @@ import { defaultScanConfig } from "./types"
 
 type LiveDirectoryUpdates = Record<string, Record<string, DirectoryProgressUpdateDto>>
 
-export function FsExplorer() {
+type FsExplorerProps = {
+  headerActions?: ReactNode
+  tableClassName?: string
+}
+
+export function FsExplorer({ headerActions, tableClassName }: FsExplorerProps) {
   const [volumes, setVolumes] = useState<DriveDto[]>([])
   const [selectedVolume, setSelectedVolume] = useState<DriveDto>()
   const [currentPath, setCurrentPath] = useState<string>()
@@ -213,7 +220,7 @@ export function FsExplorer() {
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-3">
+    <section className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       <div className="flex min-h-8 items-center gap-2 overflow-hidden">
         <div className="min-w-0 flex-1 overflow-hidden">
           <PathButtonGroup
@@ -224,26 +231,32 @@ export function FsExplorer() {
             onBackToRoot={returnToVolumes}
           />
         </div>
-        {canReloadCurrentPath ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Reload current path"
-            disabled={isReloadingCurrentPath}
-            onClick={() => void reloadCurrentPath()}
-          >
-            {isReloadingCurrentPath ? (
-              <Spinner />
-            ) : (
-              <RefreshCwIcon data-icon="inline-start" />
-            )}
-          </Button>
+        {canReloadCurrentPath || headerActions ? (
+          <ButtonGroup>
+            {canReloadCurrentPath ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label="Reload current path"
+                disabled={isReloadingCurrentPath}
+                onClick={() => void reloadCurrentPath()}
+              >
+                {isReloadingCurrentPath ? (
+                  <Spinner />
+                ) : (
+                  <RefreshCwIcon data-icon="inline-start" />
+                )}
+              </Button>
+            ) : null}
+            {headerActions}
+          </ButtonGroup>
         ) : null}
       </div>
       {scanProgress ? <ScanProgressBar snapshot={scanProgress} /> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <ExplorerTable
+        className={tableClassName}
         volumes={volumes}
         listing={displayListing}
         loadingPath={loadingPath}
