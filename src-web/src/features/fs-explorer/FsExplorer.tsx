@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { ExplorerTable } from "./ExplorerTable"
 import { PathButtonGroup } from "./PathButtonGroup"
 import { createExplorerCache, getCachedListing, putCachedListing } from "./cache"
+import type { VisualizerCellInput, VisualizerLevelSnapshot } from "@/features/visualizer/types"
 import type {
   DirectoryListingDto,
   DirectoryProgressUpdateDto,
@@ -26,12 +27,14 @@ type FsExplorerProps = {
   tableClassName?: string
   visualizerOpen: boolean
   onVisualizerToggle: () => void
+  onVisualizerSnapshotChange?: (snapshot: VisualizerLevelSnapshot) => void
 }
 
 export function FsExplorer({
   tableClassName,
   visualizerOpen,
   onVisualizerToggle,
+  onVisualizerSnapshotChange,
 }: FsExplorerProps) {
   const [volumes, setVolumes] = useState<DriveDto[]>([])
   const [selectedVolume, setSelectedVolume] = useState<DriveDto>()
@@ -82,6 +85,31 @@ export function FsExplorer({
       .then(setVolumes)
       .catch((error: unknown) => setError(error instanceof Error ? error.message : String(error)))
   }, [])
+
+  useEffect(() => {
+    if (!onVisualizerSnapshotChange) {
+      return
+    }
+
+    if (!currentPath) {
+      const items = volumes.map(volumeToVisualizerItem)
+      onVisualizerSnapshotChange({
+        path: null,
+        parentPath: null,
+        items,
+        generation: createVisualizerGeneration(null, items),
+      })
+      return
+    }
+
+    const items = displayListing ? displayListing.children.filter((node) => node.visible).map(nodeToVisualizerItem) : []
+    onVisualizerSnapshotChange({
+      path: currentPath,
+      parentPath: selectedVolume ? getVisualizerParentPath(currentPath, selectedVolume.mountPoint) : null,
+      items,
+      generation: createVisualizerGeneration(currentPath, items),
+    })
+  }, [currentPath, displayListing, onVisualizerSnapshotChange, selectedVolume, volumes])
 
   const mergeListing = useCallback((listing: DirectoryListingDto) => {
     setCache((cache) => putCachedListing(cache, listing))
@@ -284,6 +312,61 @@ function listingNeedsScan(listing: DirectoryListingDto) {
 
 function scanKey(path: string) {
   return `${path}::${JSON.stringify(defaultScanConfig)}`
+}
+
+function volumeToVisualizerItem(volume: DriveDto): VisualizerCellInput {
+  return {
+    id: volume.id,
+    label: volume.label,
+    path: volume.mountPoint,
+    kind: "volume",
+    size: Math.max(0, volume.usedSpace),
+    state: "complete",
+  }
+}
+
+function nodeToVisualizerItem(node: PathNodeDto): VisualizerCellInput {
+  return {
+    id: node.path,
+    label: node.name,
+    path: node.path,
+    kind: node.kind,
+    size: Math.max(0, node.logicalSize),
+    state: node.state,
+  }
+}
+
+function createVisualizerGeneration(path: string | null, items: VisualizerCellInput[]) {
+  return `${path ?? "volumes"}:${items.map((item) => `${item.id}:${item.size}:${item.state ?? ""}`).join("|")}`
+}
+
+function getVisualizerParentPath(path: string, rootPath: string) {
+  const normalizedPath = normalizePath(path)
+  const normalizedRoot = normalizePath(rootPath)
+
+  if (normalizedPath === normalizedRoot || !isInsideRoot(normalizedPath, normalizedRoot)) {
+    return null
+  }
+
+  const relative = normalizedPath.slice(normalizedRoot.length).replace(/^\/+/, "")
+  const parts = relative.split("/").filter(Boolean)
+  if (parts.length <= 1) {
+    return normalizedRoot
+  }
+
+  const parentPath = parts.slice(0, -1).join("/")
+  return normalizedRoot === "/" ? `/${parentPath}` : `${normalizedRoot}/${parentPath}`
+}
+
+function normalizePath(path: string) {
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "")
+  return normalized || "/"
+}
+
+function isInsideRoot(path: string, rootPath: string) {
+  return rootPath === "/"
+    ? path.startsWith("/")
+    : path === rootPath || path.startsWith(`${rootPath}/`)
 }
 
 function ScanProgressBar({ snapshot }: { snapshot: ProgressSnapshotDto }) {

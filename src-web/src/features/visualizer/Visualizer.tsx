@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { MutableRefObject } from "react"
 
 import { RafLoop } from "@/lib/raf-loop"
+import type { VisualizerLevelSnapshot } from "./types"
 import { Voronoi } from "./voronoi"
 
-export function Visualizer() {
+type VisualizerProps = {
+  snapshot: VisualizerLevelSnapshot
+}
+
+export function Visualizer({ snapshot }: VisualizerProps) {
   const [fps, setFps] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const frameCountRef = useRef(0)
@@ -12,6 +17,14 @@ export function Visualizer() {
   const sampleElapsedRef = useRef(0)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const voronoiRef = useRef<Voronoi | undefined>(undefined)
+  const snapshotRef = useRef(snapshot)
+  const snapshotSignature = useMemo(() => createSnapshotSignature(snapshot), [snapshot])
+
+  useEffect(() => {
+    snapshotRef.current = snapshot
+    voronoiRef.current?.setSnapshot(snapshot)
+    needsDrawRef.current = true
+  }, [snapshot, snapshotSignature])
 
   useEffect(() => {
     const loop = new RafLoop((deltaSeconds) => {
@@ -25,8 +38,12 @@ export function Visualizer() {
       }
 
       if (needsDrawRef.current) {
-        drawVisualizer(canvasRef.current, wrapperRef.current, voronoiRef)
-        needsDrawRef.current = false
+        needsDrawRef.current = drawVisualizer(
+          canvasRef.current,
+          wrapperRef.current,
+          voronoiRef,
+          snapshotRef.current,
+        )
       }
     })
 
@@ -63,9 +80,10 @@ function drawVisualizer(
   canvas: HTMLCanvasElement | null,
   wrapper: HTMLDivElement | null,
   voronoiRef: MutableRefObject<Voronoi | undefined>,
+  snapshot: VisualizerLevelSnapshot,
 ) {
   if (!canvas || !wrapper) {
-    return
+    return false
   }
 
   const width = Math.max(1, Math.floor(wrapper.clientWidth))
@@ -77,15 +95,19 @@ function drawVisualizer(
   if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
     canvas.width = backingWidth
     canvas.height = backingHeight
-    voronoiRef.current = new Voronoi(width, height)
+    voronoiRef.current = new Voronoi(width, height, snapshot)
   }
 
   const context = canvas.getContext("2d")
   if (!context) {
-    return
+    return false
   }
 
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
-  voronoiRef.current ??= new Voronoi(width, height)
-  voronoiRef.current.draw(context)
+  voronoiRef.current ??= new Voronoi(width, height, snapshot)
+  return voronoiRef.current.draw(context)
+}
+
+function createSnapshotSignature(snapshot: VisualizerLevelSnapshot) {
+  return `${snapshot.path ?? "volumes"}:${snapshot.parentPath ?? ""}:${snapshot.generation}`
 }

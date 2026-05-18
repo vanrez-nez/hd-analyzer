@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 
 import {
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/resizable"
 import { FsExplorer } from "@/features/fs-explorer/FsExplorer"
 import { Visualizer } from "@/features/visualizer/Visualizer"
+import type { VisualizerLevelSnapshot } from "@/features/visualizer/types"
 
 type SplitLayout = {
   explorer: number
@@ -22,8 +23,18 @@ const DEFAULT_SPLIT_LAYOUT: SplitLayout = {
 export function Layout() {
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(DEFAULT_SPLIT_LAYOUT)
+  const [visualizerSnapshot, setVisualizerSnapshot] = useState<VisualizerLevelSnapshot>({
+    path: null,
+    parentPath: null,
+    items: [],
+    generation: "volumes:",
+  })
   const explorerPanelRef = useRef<PanelImperativeHandle | null>(null)
   const visualizerPanelRef = useRef<PanelImperativeHandle | null>(null)
+
+  const handleVisualizerSnapshotChange = useCallback((snapshot: VisualizerLevelSnapshot) => {
+    setVisualizerSnapshot(snapshot)
+  }, [])
 
   useEffect(() => {
     if (splitOpen) {
@@ -62,6 +73,7 @@ export function Layout() {
         <FsExplorer
           visualizerOpen={splitOpen}
           onVisualizerToggle={() => setSplitOpen((open) => !open)}
+          onVisualizerSnapshotChange={handleVisualizerSnapshotChange}
         />
       </ResizablePanel>
       <ResizableHandle withHandle className={splitOpen ? "bg-transparent after:hidden" : "hidden"} />
@@ -74,7 +86,7 @@ export function Layout() {
         panelRef={visualizerPanelRef}
         className="min-h-0 min-w-0 overflow-hidden"
       >
-        <Visualizer />
+        <Visualizer snapshot={visualizerSnapshot} />
       </ResizablePanel>
     </ResizablePanelGroup>
   )
