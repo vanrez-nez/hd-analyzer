@@ -1412,6 +1412,7 @@ dependencies = [
  "core-foundation-sys",
  "humansize",
  "jwalk",
+ "log",
  "nix",
  "objc2-foundation",
  "rayon",

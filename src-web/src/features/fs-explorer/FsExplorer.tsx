@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
 import { fsListVolumes, fsOpenPath, fsStartScan } from "@/api"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { ExplorerTable } from "./ExplorerTable"
 import { PathButtonGroup } from "./PathButtonGroup"
 import { createExplorerCache, getCachedListing, putCachedListing } from "./cache"
 import type {
   DirectoryListingDto,
+  DirectoryProgressUpdateDto,
   DriveDto,
   ExplorerCache,
   FsProgressEvent,
   PathNodeDto,
+  ProgressSnapshotDto,
 } from "./types"
 import { defaultScanConfig } from "./types"
+
+type LiveDirectoryUpdates = Record<string, Record<string, DirectoryProgressUpdateDto>>
 
 export function FsExplorer() {
   const [volumes, setVolumes] = useState<DriveDto[]>([])
@@ -22,12 +27,42 @@ export function FsExplorer() {
   const [currentPath, setCurrentPath] = useState<string>()
   const [cache, setCache] = useState<ExplorerCache>(() => createExplorerCache())
   const [loadingPath, setLoadingPath] = useState<string>()
+  const [scanProgress, setScanProgress] = useState<ProgressSnapshotDto>()
+  const [liveUpdates, setLiveUpdates] = useState<LiveDirectoryUpdates>({})
   const [error, setError] = useState<string>()
+  const activeScansRef = useRef<Set<string>>(new Set())
 
   const listing = useMemo(
     () => (currentPath ? getCachedListing(cache, currentPath) : undefined),
     [cache, currentPath],
   )
+  const displayListing = useMemo(() => {
+    if (!listing) {
+      return undefined
+    }
+
+    const updates = liveUpdates[listing.path]
+    if (!updates) {
+      return listing
+    }
+
+    return {
+      ...listing,
+      children: listing.children.map((node) => {
+        const update = updates[node.path]
+        if (!update) {
+          return node
+        }
+
+        return {
+          ...node,
+          size: update.size,
+          logicalSize: update.logicalSize,
+          state: update.state,
+        }
+      }),
+    }
+  }, [listing, liveUpdates])
   const canReloadCurrentPath = Boolean(selectedVolume && currentPath)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
 
@@ -39,6 +74,14 @@ export function FsExplorer() {
 
   const mergeListing = useCallback((listing: DirectoryListingDto) => {
     setCache((cache) => putCachedListing(cache, listing))
+    setLiveUpdates((updates) => {
+      if (!updates[listing.path]) {
+        return updates
+      }
+
+      const { [listing.path]: _finished, ...remaining } = updates
+      return remaining
+    })
   }, [])
 
   const handleProgress = useCallback(
@@ -46,11 +89,67 @@ export function FsExplorer() {
       if (event.event === "directoryReady") {
         mergeListing(event.data.listing)
       }
+      if (event.event === "progressSnapshot") {
+        setScanProgress(event.data.snapshot)
+      }
+      if (event.event === "directoryProgress") {
+        setScanProgress(event.data.snapshot)
+        setLiveUpdates((updates) => ({
+          ...updates,
+          [event.data.path]: {
+            ...(updates[event.data.path] ?? {}),
+            ...Object.fromEntries(event.data.updates.map((update) => [update.path, update])),
+          },
+        }))
+      }
       if (event.event === "jobFinished" || event.event === "jobFailed") {
+        activeScansRef.current.delete(scanKey(event.data.path))
         setLoadingPath(undefined)
+        setScanProgress(undefined)
+        setLiveUpdates((updates) => {
+          if (!updates[event.data.path]) {
+            return updates
+          }
+
+          const { [event.data.path]: _finished, ...remaining } = updates
+          return remaining
+        })
       }
     },
     [mergeListing],
+  )
+
+  const startScan = useCallback(
+    async (path: string, volumeRoot: string, replaceExisting = false) => {
+      const key = scanKey(path)
+      if (!replaceExisting && activeScansRef.current.has(key)) {
+        return
+      }
+
+      activeScansRef.current.add(key)
+      setScanProgress({
+        jobId: "",
+        requestId: "",
+        state: "queued",
+        estimatedTotalBytes: null,
+        scheduledUnits: 0,
+        discoveredUnits: 0,
+        completedUnits: 0,
+        activeUnits: 0,
+        skippedUnits: 0,
+        failedUnits: 0,
+        canceledUnits: 0,
+        bytesMeasured: 0,
+        activePaths: [path],
+      })
+      try {
+        await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress, replaceExisting)
+      } catch (error) {
+        activeScansRef.current.delete(key)
+        throw error
+      }
+    },
+    [handleProgress],
   )
 
   const openPath = useCallback(
@@ -68,7 +167,7 @@ export function FsExplorer() {
         const listing = await fsOpenPath(path, volumeRoot, defaultScanConfig)
         mergeListing(listing)
         if (listingNeedsScan(listing)) {
-          await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress)
+          await startScan(path, volumeRoot)
         } else {
           setLoadingPath(undefined)
         }
@@ -77,7 +176,7 @@ export function FsExplorer() {
         setLoadingPath(undefined)
       }
     },
-    [cache, handleProgress, mergeListing, selectedVolume],
+    [cache, mergeListing, selectedVolume, startScan],
   )
 
   const openVolume = (volume: DriveDto) => {
@@ -99,12 +198,12 @@ export function FsExplorer() {
     setError(undefined)
     setLoadingPath(currentPath)
     try {
-      await fsStartScan(currentPath, selectedVolume.mountPoint, defaultScanConfig, handleProgress)
+      await startScan(currentPath, selectedVolume.mountPoint, true)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
       setLoadingPath(undefined)
     }
-  }, [currentPath, handleProgress, selectedVolume])
+  }, [currentPath, selectedVolume, startScan])
 
   const returnToVolumes = () => {
     setSelectedVolume(undefined)
@@ -142,10 +241,11 @@ export function FsExplorer() {
           </Button>
         ) : null}
       </div>
+      {scanProgress ? <ScanProgressBar snapshot={scanProgress} /> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <ExplorerTable
         volumes={volumes}
-        listing={listing}
+        listing={displayListing}
         loadingPath={loadingPath}
         onOpenVolume={openVolume}
         onOpenNode={openNode}
@@ -156,4 +256,25 @@ export function FsExplorer() {
 
 function listingNeedsScan(listing: DirectoryListingDto) {
   return listing.children.some((node) => node.kind === "directory" && node.state !== "complete")
+}
+
+function scanKey(path: string) {
+  return `${path}::${JSON.stringify(defaultScanConfig)}`
+}
+
+function ScanProgressBar({ snapshot }: { snapshot: ProgressSnapshotDto }) {
+  const totalBytes = snapshot.estimatedTotalBytes ?? 0
+  const hasEstimate = totalBytes > 0
+  const percent = hasEstimate
+    ? Math.min(snapshot.state === "completed" ? 100 : 99, (snapshot.bytesMeasured / totalBytes) * 100)
+    : 0
+
+  return (
+    <div className="flex h-5 items-center gap-2">
+      <Progress value={percent} className="h-1.5 flex-1" />
+      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {hasEstimate ? `${Math.round(percent)}%` : "Scan"}
+      </span>
+    </div>
+  )
 }

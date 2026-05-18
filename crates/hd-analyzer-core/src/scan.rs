@@ -14,6 +14,7 @@ use crate::driver::{
     DirectoryListing, DirectorySizeSummary, EntryKind, NodeState, PathNode, PreciseDirectoryScan,
     ReadIssueKind, ScanIssue,
 };
+use crate::jobs::CancelToken;
 use crate::rules::ScanConfig;
 use crate::safety::classify_path_safety;
 use crate::size::{HardLinkDedupe, directory_measurement};
@@ -283,6 +284,23 @@ pub fn discover_directory_with_precise_sizes(
     path: &Path,
     config: &ScanConfig,
 ) -> std::io::Result<PreciseDirectoryScan> {
+    discover_directory_with_precise_sizes_with_cancel(path, config, None)
+}
+
+pub fn discover_directory_with_precise_sizes_with_cancel(
+    path: &Path,
+    config: &ScanConfig,
+    cancel_token: Option<&CancelToken>,
+) -> std::io::Result<PreciseDirectoryScan> {
+    discover_directory_with_precise_sizes_with_cancel_and_progress(path, config, cancel_token, None)
+}
+
+pub fn discover_directory_with_precise_sizes_with_cancel_and_progress(
+    path: &Path,
+    config: &ScanConfig,
+    cancel_token: Option<&CancelToken>,
+    progress: Option<&PreciseScanProgressCallback<'_>>,
+) -> std::io::Result<PreciseDirectoryScan> {
     let path = path.canonicalize()?;
     let mut dedupe = HardLinkDedupe::new();
     let root_device = if config.stay_on_filesystem {
@@ -290,7 +308,14 @@ pub fn discover_directory_with_precise_sizes(
     } else {
         None
     };
-    discover_directory_precise_inner(&path, config, &mut dedupe, root_device)
+    discover_directory_precise_inner_with_progress(
+        &path,
+        config,
+        &mut dedupe,
+        root_device,
+        cancel_token,
+        progress,
+    )
 }
 
 fn discover_directory_inner(
@@ -354,6 +379,7 @@ fn discover_directory_inner(
                         &entry_path,
                         &metadata,
                         config.dedupe_hard_links,
+                        config.size_measurement_mode,
                     );
                     total_measured_size =
                         total_measured_size.saturating_add(measurement.allocated_bytes);
@@ -440,6 +466,7 @@ fn discover_directory_inner(
                         &entry_path,
                         &metadata,
                         config.dedupe_hard_links,
+                        config.size_measurement_mode,
                     );
                     total_measured_size =
                         total_measured_size.saturating_add(measurement.allocated_bytes);
@@ -546,160 +573,118 @@ fn measure_directory_node(
     }
 }
 
-#[derive(Debug, Default)]
-struct DirectoryTreeMeasurement {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PreciseScanProgress {
+    pub entries_visited: u64,
+    pub files_visited: u64,
+    pub directories_visited: u64,
+    pub bytes_measured: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreciseDirectoryProgressUpdate {
+    pub path: PathBuf,
+    pub allocated_bytes: u64,
+    pub logical_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreciseScanUpdate {
+    pub progress: PreciseScanProgress,
+    pub directory_updates: Vec<PreciseDirectoryProgressUpdate>,
+}
+
+pub type PreciseScanProgressCallback<'a> = dyn Fn(PreciseScanUpdate) + Send + Sync + 'a;
+
+#[derive(Debug, Clone)]
+struct DirectChild {
+    path: PathBuf,
+    name: String,
+    kind: EntryKind,
     allocated_bytes: u64,
     logical_bytes: u64,
     has_visible_children: bool,
     issues: Vec<ScanIssue>,
+}
+
+#[derive(Debug, Default)]
+struct DirectoryAccumulator {
+    allocated_bytes: u64,
+    logical_bytes: u64,
+    has_visible_children: bool,
+    issues: Vec<ScanIssue>,
+}
+
+#[derive(Debug, Default)]
+struct MeasuredDirectory {
+    accumulator: DirectoryAccumulator,
+    direct_children: Vec<DirectChild>,
     summaries: Vec<DirectorySizeSummary>,
 }
 
-fn discover_directory_precise_inner(
+fn discover_directory_precise_inner_with_progress(
     path: &Path,
     config: &ScanConfig,
     dedupe: &mut HardLinkDedupe,
     root_device: Option<u64>,
+    cancel_token: Option<&CancelToken>,
+    progress: Option<&PreciseScanProgressCallback<'_>>,
 ) -> std::io::Result<PreciseDirectoryScan> {
+    let config_fingerprint = config.fingerprint();
+    let mut stats = PreciseScanProgress::default();
+    let mut last_progress = Instant::now();
+    let mut live_updates = LiveUpdateCollector::new(config);
+    let MeasuredDirectory {
+        accumulator: root_accumulator,
+        direct_children,
+        summaries,
+    } = measure_directory_contents(
+        path,
+        config,
+        dedupe,
+        root_device,
+        cancel_token,
+        progress,
+        &mut stats,
+        &mut last_progress,
+        None,
+        &mut live_updates,
+        true,
+        &config_fingerprint,
+    )?;
+    if let Some(progress) = progress {
+        live_updates.flush_all(progress, &stats);
+        progress(PreciseScanUpdate {
+            progress: stats,
+            directory_updates: Vec::new(),
+        });
+    }
     let mut children = Vec::new();
-    let mut issues = Vec::new();
-    let mut summaries = Vec::new();
     let mut total_visible_size = 0u64;
-    let mut total_measured_size = 0u64;
-    let mut total_logical_size = 0u64;
     let mut has_more_depth = false;
 
-    for entry_result in direct_entries(path, config) {
-        let entry = match entry_result {
-            Ok(entry) => entry,
-            Err(error) => {
-                issues.push(issue_from_walk_error(path, error));
-                continue;
-            }
-        };
-
-        let entry_path = entry.path();
-        let name = entry.file_name.to_string_lossy().into_owned();
-        let is_visible_by_config = !config.is_hidden_name(&name);
-
-        if entry.path_is_symlink() && !config.follow_symlinks {
-            match std::fs::symlink_metadata(&entry_path) {
-                Ok(metadata) => {
-                    let measurement = dedupe.measure_file_with_policy(
-                        &entry_path,
-                        &metadata,
-                        config.dedupe_hard_links,
-                    );
-                    total_measured_size =
-                        total_measured_size.saturating_add(measurement.allocated_bytes);
-                    total_logical_size =
-                        total_logical_size.saturating_add(measurement.logical_bytes);
-                    if is_visible_by_config {
-                        total_visible_size =
-                            total_visible_size.saturating_add(measurement.allocated_bytes);
-                        children.push(PathNode {
-                            path: entry_path.clone(),
-                            name,
-                            kind: EntryKind::File,
-                            parent_path: Some(path.to_path_buf()),
-                            depth_from_request: 1,
-                            size: measurement.allocated_bytes,
-                            logical_size: measurement.logical_bytes,
-                            state: NodeState::Complete,
-                            visible: true,
-                            children_known: true,
-                            active_job_id: None,
-                            delete_safety: classify_path_safety(&entry_path),
-                            issues: Vec::new(),
-                        });
-                    }
-                }
-                Err(error) => issues.push(ScanIssue {
-                    path: entry_path,
-                    kind: ReadIssueKind::MetadataFailed,
-                    message: error.to_string(),
-                }),
-            }
+    for child in direct_children {
+        if child.kind == EntryKind::Directory && !config.should_show_folder(child.allocated_bytes) {
             continue;
         }
 
-        let file_type = entry.file_type;
-        if file_type.is_dir() {
-            if crosses_filesystem_boundary(&entry, root_device) {
-                if is_visible_by_config {
-                    issues.push(ScanIssue {
-                        path: entry_path,
-                        kind: ReadIssueKind::FilesystemBoundary,
-                        message: "Directory is on a different filesystem.".to_string(),
-                    });
-                }
-                continue;
-            }
-
-            let measurement = measure_directory_tree(&entry_path, config, dedupe, root_device);
-            total_measured_size = total_measured_size.saturating_add(measurement.allocated_bytes);
-            total_logical_size = total_logical_size.saturating_add(measurement.logical_bytes);
-            issues.extend(measurement.issues.clone());
-            summaries.extend(measurement.summaries.clone());
-
-            if is_visible_by_config && config.should_show_folder(measurement.allocated_bytes) {
-                total_visible_size = total_visible_size.saturating_add(measurement.allocated_bytes);
-                has_more_depth |= measurement.has_visible_children;
-                children.push(PathNode {
-                    path: entry_path.clone(),
-                    name,
-                    kind: EntryKind::Directory,
-                    parent_path: Some(path.to_path_buf()),
-                    depth_from_request: 1,
-                    size: measurement.allocated_bytes,
-                    logical_size: measurement.logical_bytes,
-                    state: NodeState::Complete,
-                    visible: true,
-                    children_known: !measurement.has_visible_children,
-                    active_job_id: None,
-                    delete_safety: classify_path_safety(&entry_path),
-                    issues: measurement.issues,
-                });
-            }
-        } else if file_type.is_file() {
-            match entry.metadata() {
-                Ok(metadata) => {
-                    let measurement = dedupe.measure_file_with_policy(
-                        &entry_path,
-                        &metadata,
-                        config.dedupe_hard_links,
-                    );
-                    total_measured_size =
-                        total_measured_size.saturating_add(measurement.allocated_bytes);
-                    total_logical_size =
-                        total_logical_size.saturating_add(measurement.logical_bytes);
-                    if is_visible_by_config {
-                        total_visible_size =
-                            total_visible_size.saturating_add(measurement.allocated_bytes);
-                        children.push(PathNode {
-                            path: entry_path.clone(),
-                            name,
-                            kind: EntryKind::File,
-                            parent_path: Some(path.to_path_buf()),
-                            depth_from_request: 1,
-                            size: measurement.allocated_bytes,
-                            logical_size: measurement.logical_bytes,
-                            state: NodeState::Complete,
-                            visible: true,
-                            children_known: true,
-                            active_job_id: None,
-                            delete_safety: classify_path_safety(&entry_path),
-                            issues: Vec::new(),
-                        });
-                    }
-                }
-                Err(error) => issues.push(ScanIssue {
-                    path: entry_path,
-                    kind: ReadIssueKind::MetadataFailed,
-                    message: error.to_string(),
-                }),
-            }
-        }
+        total_visible_size = total_visible_size.saturating_add(child.allocated_bytes);
+        has_more_depth |= child.kind == EntryKind::Directory && child.has_visible_children;
+        children.push(PathNode {
+            path: child.path.clone(),
+            name: child.name,
+            kind: child.kind,
+            parent_path: Some(path.to_path_buf()),
+            depth_from_request: 1,
+            size: child.allocated_bytes,
+            logical_size: child.logical_bytes,
+            state: NodeState::Complete,
+            visible: true,
+            children_known: child.kind != EntryKind::Directory || !child.has_visible_children,
+            active_job_id: None,
+            delete_safety: classify_path_safety(&child.path),
+            issues: child.issues,
+        });
     }
 
     children.sort_by(|left, right| {
@@ -711,73 +696,301 @@ fn discover_directory_precise_inner(
 
     let listing = DirectoryListing {
         path: path.to_path_buf(),
-        config_fingerprint: config.fingerprint(),
+        config_fingerprint,
         children,
         total_visible_size,
-        total_measured_size,
-        total_logical_size,
+        total_measured_size: root_accumulator.allocated_bytes,
+        total_logical_size: root_accumulator.logical_bytes,
         state: NodeState::Complete,
         loaded_depth: 1.min(config.requested_depth),
         has_more_depth,
-        issues,
+        issues: root_accumulator.issues,
         generation: 0,
     };
 
     Ok(PreciseDirectoryScan { listing, summaries })
 }
 
-fn measure_directory_tree(
+fn is_canceled(cancel_token: Option<&CancelToken>) -> bool {
+    cancel_token.is_some_and(CancelToken::is_canceled)
+}
+
+fn canceled_error() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Interrupted, "filesystem scan canceled")
+}
+
+#[derive(Debug, Default)]
+struct LiveDirectoryTotals {
+    allocated_bytes: u64,
+    logical_bytes: u64,
+}
+
+#[derive(Debug)]
+struct LiveUpdateCollector {
+    enabled: bool,
+    throttle: Duration,
+    min_bytes_delta: u64,
+    max_batch_size: usize,
+    current: HashMap<PathBuf, LiveDirectoryTotals>,
+    last_emitted: HashMap<PathBuf, LiveDirectoryTotals>,
+    pending: HashMap<PathBuf, PreciseDirectoryProgressUpdate>,
+    last_flush: Instant,
+}
+
+impl LiveUpdateCollector {
+    fn new(config: &ScanConfig) -> Self {
+        Self {
+            enabled: config.live_updates.enabled,
+            throttle: Duration::from_millis(config.live_updates.throttle_ms),
+            min_bytes_delta: config.live_updates.min_bytes_delta,
+            max_batch_size: config.live_updates.max_batch_size.max(1),
+            current: HashMap::new(),
+            last_emitted: HashMap::new(),
+            pending: HashMap::new(),
+            last_flush: Instant::now(),
+        }
+    }
+
+    fn add_bytes(
+        &mut self,
+        path: Option<&Path>,
+        allocated_bytes: u64,
+        logical_bytes: u64,
+        progress: Option<&PreciseScanProgressCallback<'_>>,
+        stats: &PreciseScanProgress,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        let Some(path) = path else {
+            return;
+        };
+
+        let path = path.to_path_buf();
+        let totals = self.current.entry(path.clone()).or_default();
+        totals.allocated_bytes = totals.allocated_bytes.saturating_add(allocated_bytes);
+        totals.logical_bytes = totals.logical_bytes.saturating_add(logical_bytes);
+        let queued_totals = LiveDirectoryTotals {
+            allocated_bytes: totals.allocated_bytes,
+            logical_bytes: totals.logical_bytes,
+        };
+
+        if self.should_queue(&path, &queued_totals) {
+            self.pending.insert(
+                path.clone(),
+                PreciseDirectoryProgressUpdate {
+                    path,
+                    allocated_bytes: queued_totals.allocated_bytes,
+                    logical_bytes: queued_totals.logical_bytes,
+                },
+            );
+        }
+
+        if self.pending.len() >= self.max_batch_size || self.last_flush.elapsed() >= self.throttle {
+            self.flush(progress, stats);
+        }
+    }
+
+    fn flush_all(
+        &mut self,
+        progress: &PreciseScanProgressCallback<'_>,
+        stats: &PreciseScanProgress,
+    ) {
+        if !self.enabled {
+            return;
+        }
+
+        for (path, totals) in &self.current {
+            let last = self.last_emitted.get(path);
+            if last.is_none_or(|last| {
+                last.allocated_bytes != totals.allocated_bytes
+                    || last.logical_bytes != totals.logical_bytes
+            }) {
+                self.pending.insert(
+                    path.clone(),
+                    PreciseDirectoryProgressUpdate {
+                        path: path.clone(),
+                        allocated_bytes: totals.allocated_bytes,
+                        logical_bytes: totals.logical_bytes,
+                    },
+                );
+            }
+        }
+        self.flush(Some(progress), stats);
+    }
+
+    fn should_queue(&self, path: &Path, totals: &LiveDirectoryTotals) -> bool {
+        if self.min_bytes_delta == 0 {
+            return true;
+        }
+
+        let Some(last) = self.last_emitted.get(path) else {
+            return totals.allocated_bytes >= self.min_bytes_delta
+                || totals.logical_bytes >= self.min_bytes_delta;
+        };
+
+        totals
+            .allocated_bytes
+            .saturating_sub(last.allocated_bytes)
+            .max(totals.logical_bytes.saturating_sub(last.logical_bytes))
+            >= self.min_bytes_delta
+    }
+
+    fn flush(
+        &mut self,
+        progress: Option<&PreciseScanProgressCallback<'_>>,
+        stats: &PreciseScanProgress,
+    ) {
+        let Some(progress) = progress else {
+            return;
+        };
+        if self.pending.is_empty() {
+            return;
+        }
+
+        let updates = self
+            .pending
+            .drain()
+            .map(|(_, update)| update)
+            .collect::<Vec<_>>();
+        for update in &updates {
+            self.last_emitted.insert(
+                update.path.clone(),
+                LiveDirectoryTotals {
+                    allocated_bytes: update.allocated_bytes,
+                    logical_bytes: update.logical_bytes,
+                },
+            );
+        }
+        self.last_flush = Instant::now();
+        progress(PreciseScanUpdate {
+            progress: *stats,
+            directory_updates: updates,
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn measure_directory_contents(
     path: &Path,
     config: &ScanConfig,
     dedupe: &mut HardLinkDedupe,
     root_device: Option<u64>,
-) -> DirectoryTreeMeasurement {
-    let mut measurement = DirectoryTreeMeasurement::default();
+    cancel_token: Option<&CancelToken>,
+    progress: Option<&PreciseScanProgressCallback<'_>>,
+    stats: &mut PreciseScanProgress,
+    last_progress: &mut Instant,
+    live_child_path: Option<&Path>,
+    live_updates: &mut LiveUpdateCollector,
+    collect_direct_children: bool,
+    config_fingerprint: &str,
+) -> std::io::Result<MeasuredDirectory> {
+    if is_canceled(cancel_token) {
+        return Err(canceled_error());
+    }
 
-    for entry_result in direct_entries(path, config) {
+    let mut measured = MeasuredDirectory::default();
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) => {
+            if is_permission_denied(&error) || path.exists() {
+                measured
+                    .accumulator
+                    .issues
+                    .push(filesystem_issue(path.to_path_buf(), error));
+                return Ok(measured);
+            }
+            return Err(error);
+        }
+    };
+
+    for entry_result in entries {
+        if is_canceled(cancel_token) {
+            return Err(canceled_error());
+        }
+
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(error) => {
-                measurement.issues.push(issue_from_walk_error(path, error));
+                measured
+                    .accumulator
+                    .issues
+                    .push(filesystem_issue(path.to_path_buf(), error));
                 continue;
             }
         };
 
         let entry_path = entry.path();
-        let name = entry.file_name.to_string_lossy().into_owned();
+        let name = entry.file_name().to_string_lossy().into_owned();
         let is_visible_by_config = !config.is_hidden_name(&name);
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                measured
+                    .accumulator
+                    .issues
+                    .push(filesystem_issue(entry_path, error));
+                continue;
+            }
+        };
 
-        if entry.path_is_symlink() && !config.follow_symlinks {
+        stats.entries_visited = stats.entries_visited.saturating_add(1);
+        if file_type.is_symlink() && !config.follow_symlinks {
             match std::fs::symlink_metadata(&entry_path) {
                 Ok(metadata) => {
-                    if is_visible_by_config {
-                        measurement.has_visible_children = true;
-                    }
                     let file = dedupe.measure_file_with_policy(
                         &entry_path,
                         &metadata,
                         config.dedupe_hard_links,
+                        config.size_measurement_mode,
                     );
-                    measurement.allocated_bytes = measurement
+                    stats.files_visited = stats.files_visited.saturating_add(1);
+                    stats.bytes_measured =
+                        stats.bytes_measured.saturating_add(file.allocated_bytes);
+                    live_updates.add_bytes(
+                        live_child_path,
+                        file.allocated_bytes,
+                        file.logical_bytes,
+                        progress,
+                        stats,
+                    );
+                    measured.accumulator.allocated_bytes = measured
+                        .accumulator
                         .allocated_bytes
                         .saturating_add(file.allocated_bytes);
-                    measurement.logical_bytes =
-                        measurement.logical_bytes.saturating_add(file.logical_bytes);
+                    measured.accumulator.logical_bytes = measured
+                        .accumulator
+                        .logical_bytes
+                        .saturating_add(file.logical_bytes);
+                    if is_visible_by_config {
+                        measured.accumulator.has_visible_children = true;
+                        if collect_direct_children {
+                            measured.direct_children.push(DirectChild {
+                                path: entry_path,
+                                name,
+                                kind: EntryKind::File,
+                                allocated_bytes: file.allocated_bytes,
+                                logical_bytes: file.logical_bytes,
+                                has_visible_children: false,
+                                issues: Vec::new(),
+                            });
+                        }
+                    }
                 }
-                Err(error) => measurement.issues.push(ScanIssue {
-                    path: entry_path,
-                    kind: ReadIssueKind::MetadataFailed,
-                    message: error.to_string(),
-                }),
+                Err(error) => measured
+                    .accumulator
+                    .issues
+                    .push(filesystem_issue(entry_path, error)),
             }
+            publish_precise_progress(progress, stats, last_progress);
             continue;
         }
 
-        let file_type = entry.file_type;
         if file_type.is_dir() {
-            if crosses_filesystem_boundary(&entry, root_device) {
+            stats.directories_visited = stats.directories_visited.saturating_add(1);
+            if crosses_filesystem_boundary_path(&entry_path, root_device) {
                 if is_visible_by_config {
-                    measurement.issues.push(ScanIssue {
+                    measured.accumulator.issues.push(ScanIssue {
                         path: entry_path,
                         kind: ReadIssueKind::FilesystemBoundary,
                         message: "Directory is on a different filesystem.".to_string(),
@@ -786,90 +999,151 @@ fn measure_directory_tree(
                 continue;
             }
 
-            if is_visible_by_config {
-                measurement.has_visible_children = true;
-            }
-            let child = measure_directory_tree(&entry_path, config, dedupe, root_device);
-            measurement.allocated_bytes = measurement
+            let child = measure_directory_contents(
+                &entry_path,
+                config,
+                dedupe,
+                root_device,
+                cancel_token,
+                progress,
+                stats,
+                last_progress,
+                if collect_direct_children && is_visible_by_config {
+                    Some(entry_path.as_path())
+                } else {
+                    live_child_path
+                },
+                live_updates,
+                false,
+                config_fingerprint,
+            )?;
+            measured.accumulator.allocated_bytes = measured
+                .accumulator
                 .allocated_bytes
-                .saturating_add(child.allocated_bytes);
-            measurement.logical_bytes = measurement
+                .saturating_add(child.accumulator.allocated_bytes);
+            measured.accumulator.logical_bytes = measured
+                .accumulator
                 .logical_bytes
-                .saturating_add(child.logical_bytes);
-            measurement.issues.extend(child.issues);
-            measurement.summaries.extend(child.summaries);
+                .saturating_add(child.accumulator.logical_bytes);
+            measured
+                .accumulator
+                .issues
+                .extend(child.accumulator.issues.clone());
+            measured.summaries.extend(child.summaries);
+            measured.summaries.push(DirectorySizeSummary {
+                path: entry_path.clone(),
+                config_fingerprint: config_fingerprint.to_string(),
+                allocated_size: child.accumulator.allocated_bytes,
+                logical_size: child.accumulator.logical_bytes,
+                has_visible_children: child.accumulator.has_visible_children,
+                issues: child.accumulator.issues.clone(),
+            });
+
+            if is_visible_by_config {
+                measured.accumulator.has_visible_children = true;
+                if collect_direct_children {
+                    measured.direct_children.push(DirectChild {
+                        path: entry_path,
+                        name,
+                        kind: EntryKind::Directory,
+                        allocated_bytes: child.accumulator.allocated_bytes,
+                        logical_bytes: child.accumulator.logical_bytes,
+                        has_visible_children: child.accumulator.has_visible_children,
+                        issues: child.accumulator.issues,
+                    });
+                }
+            }
         } else if file_type.is_file() {
             match entry.metadata() {
                 Ok(metadata) => {
-                    if is_visible_by_config {
-                        measurement.has_visible_children = true;
-                    }
                     let file = dedupe.measure_file_with_policy(
                         &entry_path,
                         &metadata,
                         config.dedupe_hard_links,
+                        config.size_measurement_mode,
                     );
-                    measurement.allocated_bytes = measurement
+                    stats.files_visited = stats.files_visited.saturating_add(1);
+                    stats.bytes_measured =
+                        stats.bytes_measured.saturating_add(file.allocated_bytes);
+                    live_updates.add_bytes(
+                        live_child_path,
+                        file.allocated_bytes,
+                        file.logical_bytes,
+                        progress,
+                        stats,
+                    );
+                    measured.accumulator.allocated_bytes = measured
+                        .accumulator
                         .allocated_bytes
                         .saturating_add(file.allocated_bytes);
-                    measurement.logical_bytes =
-                        measurement.logical_bytes.saturating_add(file.logical_bytes);
+                    measured.accumulator.logical_bytes = measured
+                        .accumulator
+                        .logical_bytes
+                        .saturating_add(file.logical_bytes);
+                    if is_visible_by_config {
+                        measured.accumulator.has_visible_children = true;
+                        if collect_direct_children {
+                            measured.direct_children.push(DirectChild {
+                                path: entry_path,
+                                name,
+                                kind: EntryKind::File,
+                                allocated_bytes: file.allocated_bytes,
+                                logical_bytes: file.logical_bytes,
+                                has_visible_children: false,
+                                issues: Vec::new(),
+                            });
+                        }
+                    }
                 }
-                Err(error) => measurement.issues.push(ScanIssue {
-                    path: entry_path,
-                    kind: ReadIssueKind::MetadataFailed,
-                    message: error.to_string(),
-                }),
+                Err(error) => measured
+                    .accumulator
+                    .issues
+                    .push(filesystem_issue(entry_path, error)),
             }
         }
+
+        publish_precise_progress(progress, stats, last_progress);
     }
 
-    measurement.summaries.push(DirectorySizeSummary {
-        path: path.to_path_buf(),
-        config_fingerprint: config.fingerprint(),
-        allocated_size: measurement.allocated_bytes,
-        logical_size: measurement.logical_bytes,
-        has_visible_children: measurement.has_visible_children,
-        issues: measurement.issues.clone(),
-    });
-
-    measurement
+    Ok(measured)
 }
 
-fn direct_entries(
-    path: &Path,
-    config: &ScanConfig,
-) -> impl Iterator<Item = Result<jwalk::DirEntry<((), ())>, jwalk::Error>> {
-    jwalk::WalkDir::new(path)
-        .min_depth(1)
-        .max_depth(1)
-        .skip_hidden(false)
-        .follow_links(config.follow_symlinks)
-        .into_iter()
-}
-
-fn issue_from_walk_error(path: &Path, error: jwalk::Error) -> ScanIssue {
+fn filesystem_issue(path: PathBuf, error: std::io::Error) -> ScanIssue {
+    let kind = if is_permission_denied(&error) {
+        ReadIssueKind::PermissionDenied
+    } else {
+        ReadIssueKind::MetadataFailed
+    };
     ScanIssue {
-        path: error
-            .path()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| path.to_path_buf()),
-        kind: if error
-            .io_error()
-            .is_some_and(|io_error| io_error.kind() == std::io::ErrorKind::PermissionDenied)
-        {
-            ReadIssueKind::PermissionDenied
-        } else {
-            ReadIssueKind::MetadataFailed
-        },
+        path,
+        kind,
         message: error.to_string(),
     }
 }
 
-fn crosses_filesystem_boundary(
-    entry: &jwalk::DirEntry<((), ())>,
-    root_device: Option<u64>,
-) -> bool {
+fn is_permission_denied(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(1)
+}
+
+fn publish_precise_progress(
+    progress: Option<&PreciseScanProgressCallback<'_>>,
+    stats: &PreciseScanProgress,
+    last_progress: &mut Instant,
+) {
+    let Some(progress) = progress else {
+        return;
+    };
+
+    if last_progress.elapsed() >= Duration::from_millis(250) {
+        progress(PreciseScanUpdate {
+            progress: *stats,
+            directory_updates: Vec::new(),
+        });
+        *last_progress = Instant::now();
+    }
+}
+
+fn crosses_filesystem_boundary_path(path: &Path, root_device: Option<u64>) -> bool {
     let Some(root_device) = root_device else {
         return false;
     };
@@ -877,21 +1151,19 @@ fn crosses_filesystem_boundary(
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        entry
-            .metadata()
-            .is_ok_and(|metadata| metadata.dev() != root_device)
+        std::fs::metadata(path).is_ok_and(|metadata| metadata.dev() != root_device)
     }
 
     #[cfg(not(unix))]
     {
-        let _ = entry;
+        let _ = path;
         false
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{Mutex, mpsc};
 
     use tempfile::tempdir;
 
@@ -1023,6 +1295,75 @@ mod tests {
             .unwrap();
         assert_eq!(top_node.state, NodeState::Complete);
         assert!(top_node.size > 0);
+    }
+
+    #[test]
+    fn precise_directory_discovery_emits_live_updates_for_visible_direct_child() {
+        let dir = tempdir().unwrap();
+        let top = dir.path().join("top");
+        std::fs::create_dir_all(&top).unwrap();
+        std::fs::write(top.join("file.txt"), b"abc").unwrap();
+        let canonical_top = top.canonicalize().unwrap();
+        let updates = Mutex::new(Vec::new());
+
+        let callback = |update: PreciseScanUpdate| {
+            updates
+                .lock()
+                .unwrap()
+                .extend(update.directory_updates.into_iter());
+        };
+        discover_directory_with_precise_sizes_with_cancel_and_progress(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                live_updates: crate::rules::LiveUpdateConfig {
+                    throttle_ms: 0,
+                    min_bytes_delta: 0,
+                    ..crate::rules::LiveUpdateConfig::default()
+                },
+                ..ScanConfig::default()
+            },
+            None,
+            Some(&callback),
+        )
+        .unwrap();
+
+        assert!(
+            updates
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|update| update.path == canonical_top && update.logical_bytes > 0)
+        );
+    }
+
+    #[test]
+    fn precise_directory_discovery_suppresses_live_updates_when_disabled() {
+        let dir = tempdir().unwrap();
+        let top = dir.path().join("top");
+        std::fs::create_dir_all(&top).unwrap();
+        std::fs::write(top.join("file.txt"), b"abc").unwrap();
+        let updates = Mutex::new(0usize);
+
+        let callback = |update: PreciseScanUpdate| {
+            *updates.lock().unwrap() += update.directory_updates.len();
+        };
+        discover_directory_with_precise_sizes_with_cancel_and_progress(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                live_updates: crate::rules::LiveUpdateConfig {
+                    enabled: false,
+                    ..crate::rules::LiveUpdateConfig::default()
+                },
+                ..ScanConfig::default()
+            },
+            None,
+            Some(&callback),
+        )
+        .unwrap();
+
+        assert_eq!(*updates.lock().unwrap(), 0);
     }
 
     #[cfg(unix)]
@@ -1201,5 +1542,35 @@ mod tests {
             .find(|summary| summary.path == canonical_nested)
             .unwrap();
         assert!(nested_summary.allocated_size > 0);
+    }
+
+    #[test]
+    fn precise_directory_discovery_stops_when_cancel_token_is_set() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("file.txt"), b"abc").unwrap();
+        let cancel_token = CancelToken::new();
+        cancel_token.cancel();
+
+        let error = discover_directory_with_precise_sizes_with_cancel(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                ..ScanConfig::default()
+            },
+            Some(&cancel_token),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn filesystem_issue_classifies_raw_eperm_as_permission_denied() {
+        let issue = filesystem_issue(
+            PathBuf::from("/protected"),
+            std::io::Error::from_raw_os_error(1),
+        );
+
+        assert_eq!(issue.kind, ReadIssueKind::PermissionDenied);
     }
 }

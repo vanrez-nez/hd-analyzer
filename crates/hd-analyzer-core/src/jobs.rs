@@ -22,6 +22,7 @@ pub struct ProgressSnapshot {
     pub job_id: String,
     pub request_id: String,
     pub state: JobState,
+    pub estimated_total_bytes: Option<u64>,
     pub scheduled_units: u64,
     pub discovered_units: u64,
     pub completed_units: u64,
@@ -39,6 +40,7 @@ impl ProgressSnapshot {
             job_id,
             request_id,
             state: JobState::Queued,
+            estimated_total_bytes: None,
             scheduled_units: 0,
             discovered_units: 0,
             completed_units: 0,
@@ -91,6 +93,7 @@ pub struct ScanJobHandle {
     pub job_id: String,
     pub request_id: String,
     pub root_path: PathBuf,
+    pub config_fingerprint: String,
     pub state: JobState,
     pub cancel_token: CancelToken,
 }
@@ -102,12 +105,13 @@ pub struct JobRegistry {
 }
 
 impl JobRegistry {
-    pub fn create(&self, root_path: PathBuf) -> ScanJobHandle {
+    pub fn create(&self, root_path: PathBuf, config_fingerprint: String) -> ScanJobHandle {
         let next = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
         let handle = ScanJobHandle {
             job_id: format!("scan-{next}"),
             request_id: format!("req-{next}"),
             root_path,
+            config_fingerprint,
             state: JobState::Queued,
             cancel_token: CancelToken::new(),
         };
@@ -127,6 +131,31 @@ impl JobRegistry {
         {
             job.state = state;
         }
+    }
+
+    pub fn state(&self, job_id: &str) -> Option<JobState> {
+        self.jobs
+            .lock()
+            .expect("job registry poisoned")
+            .get(job_id)
+            .map(|job| job.state)
+    }
+
+    pub fn active_exact(
+        &self,
+        path: &std::path::Path,
+        config_fingerprint: &str,
+    ) -> Option<ScanJobHandle> {
+        self.jobs
+            .lock()
+            .expect("job registry poisoned")
+            .values()
+            .find(|job| {
+                job.root_path == path
+                    && job.config_fingerprint == config_fingerprint
+                    && matches!(job.state, JobState::Queued | JobState::Running)
+            })
+            .cloned()
     }
 
     pub fn cancel(&self, job_id: &str) -> bool {
@@ -185,10 +214,20 @@ mod tests {
     #[test]
     fn supersede_marks_matching_active_jobs() {
         let registry = JobRegistry::default();
-        registry.create(PathBuf::from("/tmp/a"));
+        registry.create(PathBuf::from("/tmp/a"), "config".to_string());
 
         let superseded = registry.supersede_path(std::path::Path::new("/tmp/a"));
 
         assert_eq!(superseded.len(), 1);
+    }
+
+    #[test]
+    fn active_exact_reuses_matching_active_job() {
+        let registry = JobRegistry::default();
+        let created = registry.create(PathBuf::from("/tmp/a"), "config".to_string());
+
+        let active = registry.active_exact(std::path::Path::new("/tmp/a"), "config");
+
+        assert_eq!(active.unwrap().job_id, created.job_id);
     }
 }

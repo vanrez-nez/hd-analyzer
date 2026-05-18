@@ -70,10 +70,7 @@ export function ExplorerTable({
               ))
             : (rows as PathNodeDto[]).map((node) => (
                 <TableRow
-                  className={cn(
-                    node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
-                    node.kind === "directory" ? safetyRowClass(node.deleteSafety?.classification) : undefined,
-                  )}
+                  className={node.kind === "directory" ? "cursor-pointer select-none" : "select-none"}
                   key={node.path}
                   title={node.deleteSafety?.reason}
                   onClick={() => {
@@ -90,7 +87,10 @@ export function ExplorerTable({
                       ) : (
                         <FileIcon data-icon="inline-start" className="size-3.5 opacity-50" />
                       )}
-                      <span title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}>
+                      <span
+                        className={node.kind === "directory" ? safetyTextClass(node.deleteSafety?.classification) : undefined}
+                        title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
+                      >
                         {truncateMiddle(node.name, NAME_MAX_LENGTH)}
                       </span>
                     </span>
@@ -104,16 +104,16 @@ export function ExplorerTable({
   )
 }
 
-function safetyRowClass(classification?: DeleteSafetyClassification) {
+function safetyTextClass(classification?: DeleteSafetyClassification) {
   switch (classification) {
     case "protected_system":
-      return "bg-destructive/10 hover:bg-destructive/15"
+      return "text-destructive"
     case "not_deletable_now":
-      return "bg-chart-1/10 hover:bg-chart-1/15"
+      return "text-chart-1"
     case "review_required":
-      return "bg-muted/60 hover:bg-muted/70"
+      return "text-muted-foreground"
     case "safe_junk":
-      return "bg-chart-2/10 hover:bg-chart-2/15"
+      return "text-chart-2"
     case "user_content":
     default:
       return undefined
@@ -230,6 +230,10 @@ function compareSizeValues(
 
 function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
   if (isWorking(node.state) || loadingPath === node.path) {
+    if (node.logicalSize > 0) {
+      return formatBytes(node.logicalSize)
+    }
+
     return (
       <span className="inline-flex">
         <Spinner />

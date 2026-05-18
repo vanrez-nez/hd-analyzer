@@ -28,6 +28,15 @@ export type ScanConfigDto = {
   stayOnFilesystem?: boolean
   followSymlinks?: boolean
   dedupeHardLinks?: boolean
+  sizeMeasurementMode?: "logicalOnly" | "logicalAndAllocated"
+  liveUpdates?: LiveUpdateConfigDto
+}
+
+export type LiveUpdateConfigDto = {
+  enabled: boolean
+  throttleMs: number
+  minBytesDelta: number
+  maxBatchSize: number
 }
 
 export type ScanIssueDto = {
@@ -93,6 +102,7 @@ export type ProgressSnapshotDto = {
   jobId: string
   requestId: string
   state: string
+  estimatedTotalBytes?: number | null
   scheduledUnits: number
   discoveredUnits: number
   completedUnits: number
@@ -102,6 +112,13 @@ export type ProgressSnapshotDto = {
   canceledUnits: number
   bytesMeasured: number
   activePaths: string[]
+}
+
+export type DirectoryProgressUpdateDto = {
+  path: string
+  size: number
+  logicalSize: number
+  state: NodeState
 }
 
 export type FsProgressEvent =
@@ -114,6 +131,16 @@ export type FsProgressEvent =
   | {
       event: "progressSnapshot"
       data: { jobId: string; requestId: string; snapshot: ProgressSnapshotDto }
+    }
+  | {
+      event: "directoryProgress"
+      data: {
+        jobId: string
+        requestId: string
+        path: string
+        updates: DirectoryProgressUpdateDto[]
+        snapshot: ProgressSnapshotDto
+      }
     }
   | { event: "jobFinished"; data: { jobId: string; requestId: string; path: string } }
   | { event: "jobFailed"; data: { jobId: string; requestId: string; path: string; message: string } }
@@ -145,4 +172,11 @@ export const defaultScanConfig: ScanConfigDto = {
   stayOnFilesystem: true,
   followSymlinks: false,
   dedupeHardLinks: false,
+  sizeMeasurementMode: "logicalOnly",
+  liveUpdates: {
+    enabled: true,
+    throttleMs: 250,
+    minBytesDelta: 8_000_000,
+    maxBatchSize: 128,
+  },
 }

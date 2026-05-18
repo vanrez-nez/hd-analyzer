@@ -15,15 +15,15 @@ use std::time::{Duration, Instant};
 
 pub use categories::{collect_categories, detect_file_kind};
 pub use driver::{
-    DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, DriverError, DriverEvent,
-    DriverResult, EntryKind, HdDriver, InvalidationReceipt, InvalidationScope, LocalHdDriver,
-    NodeState, OpenPathRequest, PathDeleteSafety, PathNode, ReadIssueKind, ScanIssue,
-    StartScanReceipt, StartScanRequest, Volume,
+    DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, DirectoryProgressUpdate,
+    DriverError, DriverEvent, DriverResult, EntryKind, HdDriver, InvalidationReceipt,
+    InvalidationScope, LocalHdDriver, NodeState, OpenPathRequest, PathDeleteSafety, PathNode,
+    ReadIssueKind, ScanIssue, StartScanReceipt, StartScanRequest, Volume,
 };
 pub use drives::{Drive, list_drives};
 pub use jobs::{JobState, ProgressSnapshot};
 pub use paths::{compact_path, format_bytes, format_ratio};
-pub use rules::ScanConfig;
+pub use rules::{LiveUpdateConfig, ScanConfig, SizeMeasurementMode};
 pub use scan::{ScanUpdate, file_disk_usage, load_current_subdirectories, scan_drive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]

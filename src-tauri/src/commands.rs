@@ -491,6 +491,7 @@ fn command_error(error: hd_analyzer_core::DriverError) -> CommandError {
         hd_analyzer_core::DriverError::InvalidPath(_) => CommandErrorCode::InvalidRoot,
         hd_analyzer_core::DriverError::PathOutsideVolume(_) => CommandErrorCode::PathOutsideVolume,
         hd_analyzer_core::DriverError::PermissionDenied(_) => CommandErrorCode::PathOutsideRoot,
+        hd_analyzer_core::DriverError::ScanCanceled => CommandErrorCode::ScanStartFailed,
         hd_analyzer_core::DriverError::Io { .. } => CommandErrorCode::DriverUnavailable,
     };
     CommandError::new(code, error.to_string())

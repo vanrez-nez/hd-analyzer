@@ -133,6 +133,7 @@ export async function fsStartScan(
   volumeRoot: string,
   config: ScanConfigDto | undefined,
   onProgress: (event: FsProgressEvent) => void,
+  replaceExisting = false,
 ): Promise<StartScanReceiptDto> {
   const progressChannel = new Channel<FsProgressEvent>()
   progressChannel.onmessage = onProgress
@@ -140,7 +141,7 @@ export async function fsStartScan(
     path,
     volumeRoot,
     config,
-    replaceExisting: true,
+    replaceExisting,
     progressChannel,
   })
 }

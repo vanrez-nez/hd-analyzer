@@ -1,6 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -22,6 +23,8 @@ pub enum DriverError {
     JobNotFound(String),
     #[error("driver unavailable: {0}")]
     DriverUnavailable(String),
+    #[error("scan canceled")]
+    ScanCanceled,
     #[error("filesystem operation failed for {path}: {source}")]
     Io {
         path: PathBuf,
@@ -231,6 +234,15 @@ pub struct StartScanReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryProgressUpdate {
+    pub path: PathBuf,
+    pub size: u64,
+    pub logical_size: u64,
+    pub state: NodeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "event", content = "data")]
 pub enum DriverEvent {
     JobQueued {
@@ -252,6 +264,13 @@ pub enum DriverEvent {
     ProgressSnapshot {
         job_id: String,
         request_id: String,
+        snapshot: ProgressSnapshot,
+    },
+    DirectoryProgress {
+        job_id: String,
+        request_id: String,
+        path: PathBuf,
+        updates: Vec<DirectoryProgressUpdate>,
         snapshot: ProgressSnapshot,
     },
     JobFinished {
@@ -299,6 +318,7 @@ pub trait HdDriver: Send + Sync {
 pub struct LocalHdDriver {
     cache: Arc<Mutex<DirectoryCache>>,
     jobs: Arc<JobRegistry>,
+    scan_gate: Arc<Mutex<()>>,
 }
 
 impl LocalHdDriver {
@@ -329,19 +349,47 @@ impl LocalHdDriver {
         &self,
         path: &Path,
         config: &ScanConfig,
+        cancel_token: Option<&crate::jobs::CancelToken>,
+        progress: Option<&crate::scan::PreciseScanProgressCallback<'_>>,
     ) -> DriverResult<DirectoryListing> {
-        let precise =
-            crate::scan::discover_directory_with_precise_sizes(path, config).map_err(|source| {
+        let started = Instant::now();
+        let precise = crate::scan::discover_directory_with_precise_sizes_with_cancel_and_progress(
+            path,
+            config,
+            cancel_token,
+            progress,
+        )
+        .map_err(|source| {
+            if source.kind() == std::io::ErrorKind::Interrupted {
+                DriverError::ScanCanceled
+            } else {
                 DriverError::Io {
                     path: path.to_path_buf(),
                     source,
                 }
-            })?;
+            }
+        })?;
+        let scan_elapsed = started.elapsed();
+        log::info!(
+            "precise filesystem scan completed for {} in {:?} with {} child node(s), {} cached summaries, total measured size {}, total logical size {}",
+            path.display(),
+            scan_elapsed,
+            precise.listing.children.len(),
+            precise.summaries.len(),
+            precise.listing.total_measured_size,
+            precise.listing.total_logical_size
+        );
+        let cache_started = Instant::now();
         let entry = self
             .cache
             .lock()
             .expect("directory cache poisoned")
             .upsert_precise(precise, CacheFreshness::Fresh);
+        log::info!(
+            "precise filesystem scan cache update for {} completed in {:?}",
+            path.display(),
+            cache_started.elapsed()
+        );
         Ok(entry.listing)
     }
 
@@ -413,6 +461,31 @@ impl LocalHdDriver {
         ensure_inside_volume(&normalized_root, &normalized_path)?;
         Ok(normalized_path)
     }
+
+    fn estimate_scan_total_bytes(
+        &self,
+        volume_root: &Path,
+        path: &Path,
+        config: &ScanConfig,
+    ) -> Option<u64> {
+        let canonical_root = canonicalize_volume_root(volume_root).ok()?;
+        if path == canonical_root {
+            return drives::list_drives().ok()?.into_iter().find_map(|drive| {
+                let drive_root = drive.mount_point.canonicalize().ok()?;
+                (drive_root == canonical_root).then(|| drive.used_space())
+            });
+        }
+
+        let fingerprint = config.fingerprint();
+        let summary_estimate = self
+            .cache
+            .lock()
+            .expect("directory cache poisoned")
+            .get_summary(path, &fingerprint)
+            .map(|summary| summary.allocated_size);
+
+        summary_estimate.filter(|estimate| *estimate > 0)
+    }
 }
 
 impl HdDriver for LocalHdDriver {
@@ -461,7 +534,23 @@ impl HdDriver for LocalHdDriver {
             self.jobs.supersede_path(&scoped_path);
         }
         let config = request.config.normalized();
-        let handle = self.jobs.create(scoped_path.clone());
+        let estimated_total_bytes =
+            self.estimate_scan_total_bytes(&request.volume_root, &scoped_path, &config);
+        let config_fingerprint = config.fingerprint();
+        if !request.replace_existing {
+            if let Some(existing) = self.jobs.active_exact(&scoped_path, &config_fingerprint) {
+                log::info!(
+                    "coalescing filesystem scan for {} into active job {}",
+                    scoped_path.display(),
+                    existing.job_id
+                );
+                return Ok(StartScanReceipt {
+                    job_id: existing.job_id,
+                    request_id: existing.request_id,
+                });
+            }
+        }
+        let handle = self.jobs.create(scoped_path.clone(), config_fingerprint);
         let receipt = StartScanReceipt {
             job_id: handle.job_id.clone(),
             request_id: handle.request_id.clone(),
@@ -477,6 +566,16 @@ impl HdDriver for LocalHdDriver {
         let driver = self.clone();
         let sink_for_worker = sink.clone();
         thread::spawn(move || {
+            if handle.cancel_token.is_canceled() {
+                driver.jobs.set_state(&handle.job_id, JobState::Canceled);
+                return;
+            }
+            let scan_gate = Arc::clone(&driver.scan_gate);
+            let _scan_guard = scan_gate.lock().expect("scan gate poisoned");
+            if handle.cancel_token.is_canceled() {
+                driver.jobs.set_state(&handle.job_id, JobState::Canceled);
+                return;
+            }
             driver.jobs.set_state(&handle.job_id, JobState::Running);
             if let Some(sink) = &sink_for_worker {
                 sink(DriverEvent::JobStarted {
@@ -486,15 +585,87 @@ impl HdDriver for LocalHdDriver {
                 });
             }
 
-            let result = driver.discover_precise_and_cache(&handle.root_path, &config);
+            let latest_scan_progress =
+                Arc::new(Mutex::new(crate::scan::PreciseScanProgress::default()));
+            let progress_callback = sink_for_worker.as_ref().map(|sink| {
+                let sink = Arc::clone(sink);
+                let job_id = handle.job_id.clone();
+                let request_id = handle.request_id.clone();
+                let root_path = handle.root_path.clone();
+                let latest_scan_progress = Arc::clone(&latest_scan_progress);
+                move |scan_update: crate::scan::PreciseScanUpdate| {
+                    let scan_progress = scan_update.progress;
+                    *latest_scan_progress
+                        .lock()
+                        .expect("scan progress state poisoned") = scan_progress;
+                    let mut snapshot = ProgressSnapshot::new(job_id.clone(), request_id.clone());
+                    snapshot.state = JobState::Running;
+                    snapshot.estimated_total_bytes = estimated_total_bytes;
+                    snapshot.scheduled_units = estimated_total_bytes.unwrap_or(0);
+                    snapshot.discovered_units = scan_progress.entries_visited;
+                    snapshot.completed_units = scan_progress.entries_visited;
+                    snapshot.active_units = 1;
+                    snapshot.bytes_measured = scan_progress.bytes_measured;
+                    if scan_update.directory_updates.is_empty() {
+                        sink(DriverEvent::ProgressSnapshot {
+                            job_id: job_id.clone(),
+                            request_id: request_id.clone(),
+                            snapshot,
+                        });
+                    } else {
+                        sink(DriverEvent::DirectoryProgress {
+                            job_id: job_id.clone(),
+                            request_id: request_id.clone(),
+                            path: root_path.clone(),
+                            updates: scan_update
+                                .directory_updates
+                                .into_iter()
+                                .map(|update| DirectoryProgressUpdate {
+                                    path: update.path,
+                                    size: update.allocated_bytes,
+                                    logical_size: update.logical_bytes,
+                                    state: NodeState::Working,
+                                })
+                                .collect(),
+                            snapshot,
+                        });
+                    }
+                }
+            });
+            let progress_ref = progress_callback
+                .as_ref()
+                .map(|callback| callback as &crate::scan::PreciseScanProgressCallback<'_>);
+            let result = driver.discover_precise_and_cache(
+                &handle.root_path,
+                &config,
+                Some(&handle.cancel_token),
+                progress_ref,
+            );
             match result {
                 Ok(listing) => {
+                    let scan_progress = *latest_scan_progress
+                        .lock()
+                        .expect("scan progress state poisoned");
+                    log::info!(
+                        "filesystem scan job {} visited {} entries ({} files, {} directories), measured {} bytes",
+                        handle.job_id,
+                        scan_progress.entries_visited,
+                        scan_progress.files_visited,
+                        scan_progress.directories_visited,
+                        scan_progress.bytes_measured
+                    );
+                    if handle.cancel_token.is_canceled() {
+                        driver.jobs.set_state(&handle.job_id, JobState::Canceled);
+                        return;
+                    }
                     driver.jobs.set_state(&handle.job_id, JobState::Completed);
                     if let Some(sink) = &sink_for_worker {
+                        let emit_started = Instant::now();
                         let mut progress =
                             ProgressSnapshot::new(handle.job_id.clone(), handle.request_id.clone());
                         progress.state = JobState::Completed;
-                        progress.scheduled_units = listing.children.len() as u64;
+                        progress.estimated_total_bytes = Some(listing.total_measured_size);
+                        progress.scheduled_units = listing.total_measured_size;
                         progress.discovered_units = listing.children.len() as u64;
                         progress.completed_units = listing.children.len() as u64;
                         progress.bytes_measured = listing.total_measured_size;
@@ -514,9 +685,29 @@ impl HdDriver for LocalHdDriver {
                             request_id: handle.request_id.clone(),
                             path: handle.root_path.clone(),
                         });
+                        log::info!(
+                            "filesystem scan job {} emitted final events in {:?}",
+                            handle.job_id,
+                            emit_started.elapsed()
+                        );
                     }
                 }
                 Err(error) => {
+                    if matches!(error, DriverError::ScanCanceled)
+                        || handle.cancel_token.is_canceled()
+                        || matches!(
+                            driver.jobs.state(&handle.job_id),
+                            Some(JobState::Superseded | JobState::Canceled)
+                        )
+                    {
+                        if !matches!(
+                            driver.jobs.state(&handle.job_id),
+                            Some(JobState::Superseded)
+                        ) {
+                            driver.jobs.set_state(&handle.job_id, JobState::Canceled);
+                        }
+                        return;
+                    }
                     driver.jobs.set_state(&handle.job_id, JobState::Failed);
                     if let Some(sink) = &sink_for_worker {
                         sink(DriverEvent::JobFailed {
@@ -709,7 +900,7 @@ mod tests {
         };
 
         driver
-            .discover_precise_and_cache(volume.path(), &config)
+            .discover_precise_and_cache(volume.path(), &config, None, None)
             .unwrap();
         let listing = driver.get_directory(volume.path(), &top, &config).unwrap();
 
@@ -740,7 +931,7 @@ mod tests {
         };
 
         driver
-            .discover_precise_and_cache(volume.path(), &config)
+            .discover_precise_and_cache(volume.path(), &config, None, None)
             .unwrap();
         let listing = driver.get_directory(volume.path(), &top, &config).unwrap();
 
@@ -781,7 +972,9 @@ mod tests {
         assert_eq!(initial_child.state, NodeState::Partial);
         assert_eq!(initial_child.size, 0);
 
-        driver.discover_precise_and_cache(&child, &config).unwrap();
+        driver
+            .discover_precise_and_cache(&child, &config, None, None)
+            .unwrap();
         let listing = driver
             .get_directory(volume.path(), &parent, &config)
             .unwrap();

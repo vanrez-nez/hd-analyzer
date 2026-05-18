@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use hd_analyzer_core::{
-    CategoryUsage, DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, Drive,
-    DriverEvent, EntryKind, FileKind, InvalidationReceipt, InvalidationScope, NodeState,
-    PathDeleteSafety, PathNode, ProgressSnapshot, ReadError, ScanConfig, ScanIssue, ScanProgress,
-    ScanResult, StartScanReceipt, Volume, paths,
+    CategoryUsage, DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing,
+    DirectoryProgressUpdate, Drive, DriverEvent, EntryKind, FileKind, InvalidationReceipt,
+    InvalidationScope, LiveUpdateConfig, NodeState, PathDeleteSafety, PathNode, ProgressSnapshot,
+    ReadError, ScanConfig, ScanIssue, ScanProgress, ScanResult, SizeMeasurementMode,
+    StartScanReceipt, Volume, paths,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +62,8 @@ pub struct ScanConfigDto {
     pub stay_on_filesystem: Option<bool>,
     pub follow_symlinks: Option<bool>,
     pub dedupe_hard_links: Option<bool>,
+    pub size_measurement_mode: Option<SizeMeasurementMode>,
+    pub live_updates: Option<LiveUpdateConfig>,
 }
 
 impl From<ScanConfigDto> for ScanConfig {
@@ -75,6 +78,10 @@ impl From<ScanConfigDto> for ScanConfig {
             stay_on_filesystem: dto.stay_on_filesystem.unwrap_or(default.stay_on_filesystem),
             follow_symlinks: dto.follow_symlinks.unwrap_or(default.follow_symlinks),
             dedupe_hard_links: dto.dedupe_hard_links.unwrap_or(default.dedupe_hard_links),
+            size_measurement_mode: dto
+                .size_measurement_mode
+                .unwrap_or(default.size_measurement_mode),
+            live_updates: dto.live_updates.unwrap_or(default.live_updates),
         }
         .normalized()
     }
@@ -92,6 +99,8 @@ impl Default for ScanConfigDto {
             stay_on_filesystem: Some(config.stay_on_filesystem),
             follow_symlinks: Some(config.follow_symlinks),
             dedupe_hard_links: Some(config.dedupe_hard_links),
+            size_measurement_mode: Some(config.size_measurement_mode),
+            live_updates: Some(config.live_updates),
         }
     }
 }
@@ -206,6 +215,26 @@ impl From<&DirectoryListing> for DirectoryListingDto {
     }
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryProgressUpdateDto {
+    pub path: String,
+    pub size: u64,
+    pub logical_size: u64,
+    pub state: NodeState,
+}
+
+impl From<&DirectoryProgressUpdate> for DirectoryProgressUpdateDto {
+    fn from(update: &DirectoryProgressUpdate) -> Self {
+        Self {
+            path: display_path(&update.path),
+            size: update.size,
+            logical_size: update.logical_size,
+            state: update.state,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StartScanReceiptDto {
@@ -278,6 +307,13 @@ pub enum FsProgressEventDto {
         request_id: String,
         snapshot: ProgressSnapshot,
     },
+    DirectoryProgress {
+        job_id: String,
+        request_id: String,
+        path: String,
+        updates: Vec<DirectoryProgressUpdateDto>,
+        snapshot: ProgressSnapshot,
+    },
     JobFinished {
         job_id: String,
         request_id: String,
@@ -335,6 +371,22 @@ impl From<DriverEvent> for FsProgressEventDto {
             } => Self::ProgressSnapshot {
                 job_id,
                 request_id,
+                snapshot,
+            },
+            DriverEvent::DirectoryProgress {
+                job_id,
+                request_id,
+                path,
+                updates,
+                snapshot,
+            } => Self::DirectoryProgress {
+                job_id,
+                request_id,
+                path: display_path(&path),
+                updates: updates
+                    .iter()
+                    .map(DirectoryProgressUpdateDto::from)
+                    .collect(),
                 snapshot,
             },
             DriverEvent::JobFinished {
@@ -596,12 +648,17 @@ mod tests {
             "showHidden": false,
             "expandAboveBytes": 1_000_000_000u64,
             "stayOnFilesystem": true,
-            "followSymlinks": false
+            "followSymlinks": false,
+            "sizeMeasurementMode": "logicalOnly"
         }))
         .unwrap();
 
         let config = ScanConfig::from(dto);
 
         assert_eq!(config.min_visible_folder_bytes, None);
+        assert_eq!(
+            config.size_measurement_mode,
+            SizeMeasurementMode::LogicalOnly
+        );
     }
 }

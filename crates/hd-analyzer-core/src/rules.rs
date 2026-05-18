@@ -3,6 +3,33 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SizeMeasurementMode {
+    LogicalOnly,
+    LogicalAndAllocated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveUpdateConfig {
+    pub enabled: bool,
+    pub throttle_ms: u64,
+    pub min_bytes_delta: u64,
+    pub max_batch_size: usize,
+}
+
+impl Default for LiveUpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            throttle_ms: 250,
+            min_bytes_delta: 8_000_000,
+            max_batch_size: 128,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanConfig {
@@ -14,6 +41,8 @@ pub struct ScanConfig {
     pub stay_on_filesystem: bool,
     pub follow_symlinks: bool,
     pub dedupe_hard_links: bool,
+    pub size_measurement_mode: SizeMeasurementMode,
+    pub live_updates: LiveUpdateConfig,
 }
 
 impl Default for ScanConfig {
@@ -27,6 +56,8 @@ impl Default for ScanConfig {
             stay_on_filesystem: true,
             follow_symlinks: false,
             dedupe_hard_links: true,
+            size_measurement_mode: SizeMeasurementMode::LogicalOnly,
+            live_updates: LiveUpdateConfig::default(),
         }
     }
 }
@@ -98,6 +129,31 @@ mod tests {
         };
 
         assert_ne!(deduped.fingerprint(), counted_per_path.fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_changes_when_size_measurement_mode_changes() {
+        let logical_only = ScanConfig::default();
+        let allocated = ScanConfig {
+            size_measurement_mode: SizeMeasurementMode::LogicalAndAllocated,
+            ..ScanConfig::default()
+        };
+
+        assert_ne!(logical_only.fingerprint(), allocated.fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_changes_when_live_update_policy_changes() {
+        let default_updates = ScanConfig::default();
+        let slower_updates = ScanConfig {
+            live_updates: LiveUpdateConfig {
+                throttle_ms: 1_000,
+                ..LiveUpdateConfig::default()
+            },
+            ..ScanConfig::default()
+        };
+
+        assert_ne!(default_updates.fingerprint(), slower_updates.fingerprint());
     }
 
     #[test]
