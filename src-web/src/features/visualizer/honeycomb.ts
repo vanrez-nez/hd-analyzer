@@ -7,11 +7,16 @@ import {
 import type { VisualizerLayout, VisualizerLayoutCell, VisualizerPoint } from "./voronoi"
 
 export const HONEYCOMB_MIN_CELL_AREA = 1
-export const HONEYCOMB_SMOOTH = 4
-export const HONEYCOMB_SEPARATION = 2
-export const HONEYCOMB_RESAMPLE_SPACING = 6
-export const HONEYCOMB_MIN_RESAMPLE_POINTS = 6
-export const HONEYCOMB_MAX_RESAMPLE_POINTS = 12
+export const HONEYCOMB_MIN_SEPARATION = 1
+export const HONEYCOMB_MAX_SEPARATION = 3
+export const HONEYCOMB_MIN_SMOOTH = 0.35
+export const HONEYCOMB_MAX_SMOOTH = 1
+export const HONEYCOMB_MIN_RESAMPLE_SPACING = 3
+export const HONEYCOMB_MAX_RESAMPLE_SPACING = 6
+export const HONEYCOMB_MIN_RESAMPLE_POINTS = 4
+export const HONEYCOMB_MAX_RESAMPLE_POINTS = 24
+export const HONEYCOMB_SMALL_RADIUS = 8
+export const HONEYCOMB_LARGE_RADIUS = 48
 export const HONEYCOMB_DEBUG_INSET = false
 
 const SMOOTH_EPSILON = 0.000001
@@ -24,8 +29,14 @@ type HoneycombOptions = {
 
 type ResolvedHoneycombOptions = {
   minCellArea: number
+  maxSeparation: number
+  maxSmooth: number
+}
+
+type HoneycombCellStyle = {
   separation: number
   smooth: number
+  resampleSpacing: number
 }
 
 export class Honeycomb {
@@ -59,17 +70,18 @@ function drawHoneycombCell(
     return
   }
 
-  const inset = insetConvexPolygon(cell.polygon, options.separation)
+  const style = resolveCellStyle(area, options)
+  const inset = insetConvexPolygon(cell.polygon, style.separation)
   if (!inset || polygonAbsArea(inset) < options.minCellArea) {
     drawInscribedCircle(context, cell)
     return
   }
 
   if (HONEYCOMB_DEBUG_INSET) {
-    drawInsetDebug(context, cell.polygon, inset, options.separation)
+    drawInsetDebug(context, cell.polygon, inset, style.separation)
   }
 
-  drawSmoothPolygon(context, inset, cell.fillColor, options.smooth)
+  drawSmoothPolygon(context, inset, cell.fillColor, style.smooth, style.resampleSpacing)
 }
 
 function drawInscribedCircle(
@@ -98,6 +110,7 @@ function drawSmoothPolygon(
   polygon: VisualizerPoint[],
   fillStyle: string,
   smooth: number,
+  resampleSpacing: number,
 ) {
   const points = cleanDrawPolygon(polygon)
   if (points.length < 3) {
@@ -111,7 +124,7 @@ function drawSmoothPolygon(
 
   const resampled = resampleClosedPolygonByArcLength(
     points,
-    HONEYCOMB_RESAMPLE_SPACING,
+    resampleSpacing,
     HONEYCOMB_MIN_RESAMPLE_POINTS,
     HONEYCOMB_MAX_RESAMPLE_POINTS,
   )
@@ -317,13 +330,38 @@ function interpolateOnClosedPerimeter(
 }
 
 function resolveOptions(options: HoneycombOptions): ResolvedHoneycombOptions {
-  const separation = Math.max(0, options.separation ?? HONEYCOMB_SEPARATION)
+  const maxSeparation = Math.max(0, options.separation ?? HONEYCOMB_MAX_SEPARATION)
 
   return {
     minCellArea: Math.max(0, options.minCellArea ?? HONEYCOMB_MIN_CELL_AREA),
-    separation,
-    smooth: clamp(options.smooth ?? HONEYCOMB_SMOOTH, 0, 1),
+    maxSeparation,
+    maxSmooth: clamp(options.smooth ?? HONEYCOMB_MAX_SMOOTH, 0, 1),
   }
+}
+
+function resolveCellStyle(area: number, options: ResolvedHoneycombOptions): HoneycombCellStyle {
+  const radius = Math.sqrt(area / Math.PI)
+  const scale = smoothStep(
+    clamp(
+      (radius - HONEYCOMB_SMALL_RADIUS) / (HONEYCOMB_LARGE_RADIUS - HONEYCOMB_SMALL_RADIUS),
+      0,
+      1,
+    ),
+  )
+
+  return {
+    separation: lerpNumber(Math.min(HONEYCOMB_MIN_SEPARATION, options.maxSeparation), options.maxSeparation, scale),
+    smooth: lerpNumber(Math.min(HONEYCOMB_MIN_SMOOTH, options.maxSmooth), options.maxSmooth, scale),
+    resampleSpacing: lerpNumber(HONEYCOMB_MIN_RESAMPLE_SPACING, HONEYCOMB_MAX_RESAMPLE_SPACING, scale),
+  }
+}
+
+function smoothStep(value: number) {
+  return value * value * (3 - 2 * value)
+}
+
+function lerpNumber(from: number, to: number, amount: number) {
+  return from + (to - from) * amount
 }
 
 function clamp(value: number, min: number, max: number) {
