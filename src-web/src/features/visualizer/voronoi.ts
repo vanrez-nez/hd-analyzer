@@ -1,37 +1,69 @@
-import { voronoiMapInitialPositionPie, voronoiMapSimulation } from "d3-voronoi-map"
+import { hierarchy } from "d3-hierarchy"
+import type { HierarchyNode } from "d3-hierarchy"
+import { voronoiTreemap } from "d3-voronoi-treemap"
 
 import type { VisualizerCellInput, VisualizerLevelSnapshot } from "./types"
 
-type WeightedCell = VisualizerCellInput & {
+type PartitionType = "size" | "type"
+type FileItemType = string
+type OverflowReason = "visibility" | "cardinality" | null
+
+type FileItem = {
+  id: string
   weight: number
+  type?: FileItemType
+  source: VisualizerCellInput
+}
+
+type VoronoiSite = {
+  id: string
+  weight: number
+  members: FileItem[]
+  isCluster: boolean
+  representative: FileItem
+  sizeRange: [number, number]
+  overflowReason: OverflowReason
+  mixed: boolean
+}
+
+type ClusterParams = {
+  visibilityThreshold?: number
+  logGapThreshold?: number
+  maxItemsPerCluster?: number
+  maxSites?: number
+  partitionByType?: boolean
+}
+
+type NormalizedClusterParams = {
+  visibilityThreshold: number
+  logGapThreshold: number
+  maxItemsPerCluster: number
+  maxSites: number
+  partitionByType: boolean
+}
+
+type ClusterResult = {
+  sites: VoronoiSite[]
+  dropped: FileItem[]
+  totalWeight: number
+  minVisible: number
+  overflowCount: number
 }
 
 type VoronoiPoint = [number, number]
 
-type VoronoiPolygon = VoronoiPoint[] & {
-  site?: {
-    originalObject?: {
-      data?: {
-        originalData?: WeightedCell
-      }
-    }
-  }
-}
-
-type VoronoiState = {
-  ended: boolean
-  polygons: VoronoiPolygon[]
-}
-
-type VoronoiSimulation = {
-  tick: () => void
-  state: () => VoronoiState
-  stop: () => VoronoiSimulation
-}
-
 type RenderCell = {
-  item: WeightedCell
+  site: VoronoiSite
   polygon: VoronoiPoint[]
+}
+
+type TreemapNodeData = {
+  site?: VoronoiSite
+  children?: TreemapNodeData[]
+}
+
+type TreemapNode = HierarchyNode<TreemapNodeData> & {
+  polygon?: VoronoiPoint[]
 }
 
 type VoronoiLayout = {
@@ -46,11 +78,28 @@ type CircleBounds = {
   radius: number
 }
 
+const MIN_AREA = 0.01
+const LOG_SPREAD = 4
+const MAX_MEMBERS = 128
+const MAX_SITES = 200
+const PARTITION_TYPE: PartitionType = "size"
+const ITERATIONS = 50
+const CONVERGENCE = 0.02
+
+const DEFAULT_PARAMS: NormalizedClusterParams = {
+  visibilityThreshold: MIN_AREA,
+  logGapThreshold: LOG_SPREAD,
+  maxItemsPerCluster: MAX_MEMBERS,
+  maxSites: MAX_SITES,
+  partitionByType: isTypePartition(PARTITION_TYPE),
+}
 const DEFAULT_SEED = 0x5eed
-const MAX_ITERATIONS = 80
-const CONVERGENCE_RATIO = 0.002
-const MIN_WEIGHT_RATIO = 1e-9
-const CIRCLE_SEGMENTS = 96
+const CIRCLE_SEGMENTS = 196
+const UNTYPED = Symbol("untyped")
+
+function isTypePartition(partitionType: PartitionType) {
+  return partitionType === "type"
+}
 
 export class Voronoi {
   private readonly circle: CircleBounds
@@ -90,7 +139,8 @@ export class Voronoi {
 }
 
 function createLayout(snapshot: VisualizerLevelSnapshot, boundary: VoronoiPoint[]): VoronoiLayout | undefined {
-  const cells = createCells(snapshot, boundary, createWeightedCells(snapshot.items))
+  const clusterResult = clusterForVoronoi(createFileItems(snapshot.items))
+  const cells = createCells(snapshot, boundary, clusterResult)
   if (!cells) {
     return undefined
   }
@@ -113,55 +163,585 @@ function createEmptyLayout(snapshot: VisualizerLevelSnapshot): VoronoiLayout {
 function createCells(
   snapshot: VisualizerLevelSnapshot,
   boundary: VoronoiPoint[],
-  items: WeightedCell[],
+  clusterResult: ClusterResult,
 ): RenderCell[] | undefined {
-  if (items.length === 0) {
+  if (clusterResult.sites.length === 0) {
     return []
   }
 
-  if (items.length === 1) {
-    return [createRenderCell(items[0], boundary)]
+  if (clusterResult.sites.length === 1) {
+    return [createRenderCell(clusterResult.sites[0], boundary)]
   }
 
+  const debugInput = createVoronoiDebugInput(snapshot, clusterResult)
+  console.groupCollapsed("[visualizer] voronoi structure")
+  console.log(debugInput.summary)
+  console.table(debugInput.largestSites)
+  console.table(debugInput.smallestSites)
+
   try {
-    const simulation = voronoiMapSimulation(items)
+    const root = hierarchy<TreemapNodeData>({
+      children: clusterResult.sites.map((site) => ({ site })),
+    }).sum((datum) => datum.site?.weight ?? 0) as TreemapNode
+
+    const treemap = voronoiTreemap()
       .clip(boundary)
-      .weight((item: WeightedCell) => item.weight)
-      .minWeightRatio(MIN_WEIGHT_RATIO)
-      .convergenceRatio(CONVERGENCE_RATIO)
-      .maxIterationCount(MAX_ITERATIONS)
-      .initialPosition(voronoiMapInitialPositionPie())
-      .prng(createRandom(hashLayout(snapshot, items)))
-      .stop() as VoronoiSimulation
+      .minWeightRatio(MIN_AREA)
+      .convergenceRatio(CONVERGENCE)
+      .maxIterationCount(ITERATIONS)
+      .prng(createRandom(hashLayout(snapshot, clusterResult.sites)))
+    treemap(root)
 
-    let state = simulation.state()
-    while (!state.ended) {
-      simulation.tick()
-      state = simulation.state()
-    }
-
-    return state.polygons
-      .map((polygon) => {
-        const item = polygon.site?.originalObject?.data?.originalData
-        return item ? createRenderCell(item, polygon) : undefined
+    const children = (root.children ?? []) as TreemapNode[]
+    const childrenWithPolygons = children.filter((node) => node.polygon?.length)
+    const childrenMissingPolygons = children.filter((node) => !node.polygon?.length)
+    const cells = children
+      .map((node) => {
+        const site = node.data.site
+        return site && node.polygon ? createRenderCell(site, node.polygon) : undefined
       })
       .filter((cell): cell is RenderCell => Boolean(cell))
-  } catch {
+
+    console.log({
+      root,
+      rootValue: root.value,
+      childCount: children.length,
+      childrenWithPolygons: childrenWithPolygons.length,
+      childrenMissingPolygons: childrenMissingPolygons.length,
+      sampleChildren: children.slice(0, 10).map(summarizeTreemapNode),
+    })
+    console.groupEnd()
+
+    return cells
+  } catch (error) {
+    console.error("[visualizer] voronoi layout failed", {
+      path: snapshot.path,
+      siteCount: clusterResult.sites.length,
+      clusterCount: clusterResult.sites.filter((site) => site.isCluster).length,
+      overflowCount: clusterResult.overflowCount,
+      minVisible: clusterResult.minVisible,
+      error,
+    })
+    console.groupEnd()
     return undefined
   }
 }
 
-function createRenderCell(item: WeightedCell, polygon: VoronoiPoint[]): RenderCell {
+function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[]): RenderCell {
   return {
-    item,
+    site,
     polygon: polygon.map(([x, y]): VoronoiPoint => [x, y]),
   }
 }
 
-function createWeightedCells(items: VisualizerCellInput[]) {
-  return items
-    .filter((item) => Number.isFinite(item.size) && item.size > 0)
-    .map((item) => ({ ...item, weight: item.size }))
+function createFileItems(items: VisualizerCellInput[]): FileItem[] {
+  return items.map((item) => ({
+    id: item.id,
+    weight: Number.isFinite(item.size) && item.size > 0 ? item.size : 0,
+    type: extensionType(item),
+    source: item,
+  }))
+}
+
+function clusterForVoronoi(items: FileItem[], params: ClusterParams = {}): ClusterResult {
+  const config = normalizeParams(params)
+  const valid: FileItem[] = []
+  const dropped: FileItem[] = []
+
+  for (const item of items) {
+    assertItem(item)
+
+    if (item.weight === 0) {
+      dropped.push(item)
+    } else {
+      valid.push(item)
+    }
+  }
+
+  const totalWeight = sumWeight(valid)
+  if (totalWeight === 0) {
+    return {
+      sites: [],
+      dropped,
+      totalWeight: 0,
+      minVisible: 0,
+      overflowCount: 0,
+    }
+  }
+
+  const minVisible = totalWeight * config.visibilityThreshold
+  const large: FileItem[] = []
+  const small: FileItem[] = []
+
+  for (const item of valid) {
+    if (item.weight >= minVisible) {
+      large.push(item)
+    } else {
+      small.push(item)
+    }
+  }
+
+  const singletonSites = large.map(toSingletonSite)
+  let clusterSites: VoronoiSite[] = []
+
+  if (small.length > 0) {
+    clusterSites = config.partitionByType
+      ? clusterSmallItemsByType(small, minVisible, config)
+      : clusterSmallItems(small, minVisible, config)
+  }
+
+  const sites = enforceSiteBudget([...singletonSites, ...clusterSites], config.maxSites, minVisible)
+  const overflowCount = sites.reduce((count, site) => count + (site.overflowReason ? 1 : 0), 0)
+
+  return {
+    sites,
+    dropped,
+    totalWeight,
+    minVisible,
+    overflowCount,
+  }
+}
+
+function normalizeParams(params: ClusterParams = {}): NormalizedClusterParams {
+  const config = {
+    ...DEFAULT_PARAMS,
+    ...params,
+  }
+
+  if (
+    !Number.isFinite(config.visibilityThreshold) ||
+    config.visibilityThreshold <= 0 ||
+    config.visibilityThreshold > 1
+  ) {
+    throw new RangeError("visibilityThreshold must be > 0 and <= 1")
+  }
+
+  if (!Number.isFinite(config.logGapThreshold) || config.logGapThreshold < 0) {
+    throw new RangeError("logGapThreshold must be >= 0")
+  }
+
+  if (!Number.isInteger(config.maxItemsPerCluster) || config.maxItemsPerCluster < 1) {
+    throw new RangeError("maxItemsPerCluster must be a positive integer")
+  }
+
+  if (!Number.isInteger(config.maxSites) || config.maxSites < 1) {
+    throw new RangeError("maxSites must be a positive integer")
+  }
+
+  config.partitionByType = Boolean(config.partitionByType)
+  return config
+}
+
+function clusterSmallItemsByType(
+  items: FileItem[],
+  minVisible: number,
+  params: NormalizedClusterParams,
+) {
+  const byType = new Map<FileItemType | typeof UNTYPED, FileItem[]>()
+
+  for (const item of items) {
+    const key = item.type === undefined ? UNTYPED : item.type
+    const group = byType.get(key) || []
+    group.push(item)
+    byType.set(key, group)
+  }
+
+  const clusters: VoronoiSite[] = []
+  const spill: FileItem[] = []
+
+  for (const group of byType.values()) {
+    const groupClusters = clusterSmallItems(group, minVisible, params)
+
+    for (const cluster of groupClusters) {
+      if (cluster.weight < minVisible) {
+        spill.push(...cluster.members)
+      } else {
+        clusters.push(cluster)
+      }
+    }
+  }
+
+  if (spill.length > 0) {
+    clusters.push(
+      ...clusterSmallItems(spill, minVisible, params).map((site) => ({
+        ...site,
+        mixed: true,
+      })),
+    )
+  }
+
+  return clusters
+}
+
+function clusterSmallItems(items: FileItem[], minVisible: number, params: NormalizedClusterParams) {
+  const sorted = stableSortByWeightAsc(items)
+  let clusters: VoronoiSite[] = []
+  let current: FileItem[] = []
+  let currentWeight = 0
+  let previousLog = -Infinity
+
+  for (const item of sorted) {
+    const itemLog = Math.log2(item.weight + 1)
+    const currentIsVisible = currentWeight >= minVisible
+    const tooSpread = itemLog - previousLog > params.logGapThreshold
+    const tooMany = current.length >= params.maxItemsPerCluster
+
+    if (current.length > 0 && currentIsVisible && (tooSpread || tooMany)) {
+      clusters.push(makeSite(current, currentWeight))
+      current = []
+      currentWeight = 0
+    }
+
+    current.push(item)
+    currentWeight += item.weight
+    previousLog = itemLog
+  }
+
+  if (current.length > 0) {
+    clusters.push(makeSite(current, currentWeight))
+  }
+
+  clusters = mergeSubthreshold(clusters, minVisible)
+  clusters = enforceCardinality(clusters, minVisible, params.maxItemsPerCluster)
+  return clusters
+}
+
+function mergeSubthreshold(clusters: VoronoiSite[], minVisible: number) {
+  if (clusters.length <= 1) {
+    return clusters
+  }
+
+  const result: VoronoiSite[] = []
+
+  for (const cluster of clusters) {
+    const last = result[result.length - 1]
+
+    if (last && last.weight < minVisible) {
+      result[result.length - 1] = mergeSites(last, cluster, minVisible)
+    } else {
+      result.push(cluster)
+    }
+  }
+
+  if (result.length >= 2 && result[result.length - 1].weight < minVisible) {
+    const tail = result.pop()
+    if (tail) {
+      result[result.length - 1] = mergeSites(result[result.length - 1], tail, minVisible)
+    }
+  }
+
+  return result
+}
+
+function enforceCardinality(clusters: VoronoiSite[], minVisible: number, maxItems: number) {
+  const result: VoronoiSite[] = []
+
+  for (const cluster of clusters) {
+    if (cluster.weight < minVisible) {
+      result.push({
+        ...cluster,
+        overflowReason: "visibility",
+      })
+      continue
+    }
+
+    if (cluster.members.length <= maxItems) {
+      result.push(cluster)
+      continue
+    }
+
+    const chunks = splitSiteIntoVisibleChunks(cluster, minVisible, maxItems)
+
+    if (chunks === null) {
+      result.push({
+        ...cluster,
+        overflowReason: "cardinality",
+      })
+    } else {
+      result.push(...chunks)
+    }
+  }
+
+  return result
+}
+
+function splitSiteIntoVisibleChunks(site: VoronoiSite, minVisible: number, maxItems: number) {
+  const targetSize = Math.max(1, Math.floor(maxItems * 0.75))
+  const chunkCount = Math.ceil(site.members.length / targetSize)
+  const chunkSize = Math.ceil(site.members.length / chunkCount)
+  const ascending = stableSortByWeightAsc(site.members)
+  const chunks: VoronoiSite[] = []
+
+  for (let index = 0; index < ascending.length; index += chunkSize) {
+    const members = ascending.slice(index, index + chunkSize)
+    const chunk = makeSite(members, sumWeight(members))
+
+    if (chunk.weight < minVisible) {
+      return null
+    }
+
+    chunks.push(chunk)
+  }
+
+  return chunks
+}
+
+function enforceSiteBudget(sites: VoronoiSite[], maxSites: number, minVisible: number) {
+  if (sites.length <= maxSites) {
+    return sortSites(sites)
+  }
+
+  const sorted = sortSites(sites)
+  const singletons = sorted.filter((site) => !site.isCluster)
+  const clusters = sorted.filter((site) => site.isCluster)
+
+  while (singletons.length + clusters.length > maxSites && clusters.length >= 2) {
+    let bestPair = 0
+    let bestGap = Infinity
+
+    for (let index = 0; index + 1 < clusters.length; index += 1) {
+      const currentGap = Math.abs(
+        Math.log2(clusters[index + 1].weight) - Math.log2(clusters[index].weight),
+      )
+
+      if (currentGap < bestGap) {
+        bestGap = currentGap
+        bestPair = index
+      }
+    }
+
+    const merged = mergeSites(clusters[bestPair], clusters[bestPair + 1], minVisible)
+    clusters.splice(bestPair, 2, merged)
+    clusters.sort(compareSiteWeightDesc)
+  }
+
+  return sortSites([...singletons, ...clusters])
+}
+
+function toSingletonSite(item: FileItem) {
+  return makeSite([item], item.weight)
+}
+
+function makeSite(members: FileItem[], weight = sumWeight(members)) {
+  const sortedMembers = stableSortByWeightDesc(members)
+  return makeSiteFromSortedMembers(sortedMembers, weight)
+}
+
+function makeSiteFromSortedMembers(sortedMembers: FileItem[], weight = sumWeight(sortedMembers)): VoronoiSite {
+  const min = sortedMembers.reduce((value, item) => (item.weight < value ? item.weight : value), Infinity)
+  const max = sortedMembers.reduce((value, item) => (item.weight > value ? item.weight : value), -Infinity)
+  const id =
+    sortedMembers.length === 1
+      ? sortedMembers[0].id
+      : `cluster:${hashMemberIds(sortedMembers)}:${sortedMembers.length}`
+
+  return {
+    id,
+    weight,
+    members: sortedMembers,
+    isCluster: sortedMembers.length > 1,
+    representative: sortedMembers[0],
+    sizeRange: [min, max],
+    overflowReason: null,
+    mixed: hasMixedTypes(sortedMembers),
+  }
+}
+
+function mergeSites(left: VoronoiSite, right: VoronoiSite, minVisible = 0) {
+  const merged = makeSiteFromSortedMembers(
+    mergeMembersByWeightDesc(left.members, right.members),
+    left.weight + right.weight,
+  )
+  merged.overflowReason = mergeOverflowReason(left, right, merged.weight, minVisible)
+  merged.mixed = Boolean(left.mixed || right.mixed || merged.mixed)
+  return merged
+}
+
+function sortSites(sites: VoronoiSite[]) {
+  return [...sites].sort(compareSiteWeightDesc)
+}
+
+function compareSiteWeightDesc(a: VoronoiSite, b: VoronoiSite) {
+  return b.weight - a.weight || siteSortId(a).localeCompare(siteSortId(b))
+}
+
+function stableSortByWeightAsc(items: FileItem[]) {
+  return [...items].sort((a, b) => a.weight - b.weight || String(a.id).localeCompare(String(b.id)))
+}
+
+function stableSortByWeightDesc(items: FileItem[]) {
+  return [...items].sort((a, b) => b.weight - a.weight || String(a.id).localeCompare(String(b.id)))
+}
+
+function siteSortId(site: VoronoiSite) {
+  return site.representative ? String(site.representative.id) : site.id
+}
+
+function mergeOverflowReason(left: VoronoiSite, right: VoronoiSite, weight: number, minVisible: number): OverflowReason {
+  if (left.overflowReason === "cardinality" || right.overflowReason === "cardinality") {
+    return "cardinality"
+  }
+
+  if (left.overflowReason === "visibility" || right.overflowReason === "visibility") {
+    return weight < minVisible ? "visibility" : null
+  }
+
+  return null
+}
+
+function mergeMembersByWeightDesc(left: FileItem[], right: FileItem[]) {
+  const merged: FileItem[] = []
+  let leftIndex = 0
+  let rightIndex = 0
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftItem = left[leftIndex]
+    const rightItem = right[rightIndex]
+
+    if (
+      leftItem.weight > rightItem.weight ||
+      (leftItem.weight === rightItem.weight && String(leftItem.id) <= String(rightItem.id))
+    ) {
+      merged.push(leftItem)
+      leftIndex += 1
+    } else {
+      merged.push(rightItem)
+      rightIndex += 1
+    }
+  }
+
+  while (leftIndex < left.length) {
+    merged.push(left[leftIndex])
+    leftIndex += 1
+  }
+
+  while (rightIndex < right.length) {
+    merged.push(right[rightIndex])
+    rightIndex += 1
+  }
+
+  return merged
+}
+
+function hasMixedTypes(members: FileItem[]) {
+  if (members.length <= 1) {
+    return false
+  }
+
+  const firstType = members[0].type
+  for (let index = 1; index < members.length; index += 1) {
+    if (members[index].type !== firstType) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function hashMemberIds(members: FileItem[]) {
+  let hash = 2166136261
+
+  for (const member of members) {
+    const id = String(member.id)
+    for (let index = 0; index < id.length; index += 1) {
+      hash ^= id.charCodeAt(index)
+      hash = Math.imul(hash, 16777619)
+    }
+    hash ^= 124
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return (hash >>> 0).toString(36)
+}
+
+function sumWeight(items: FileItem[]) {
+  return items.reduce((sum, item) => sum + item.weight, 0)
+}
+
+function assertItem(item: FileItem) {
+  if (!item || typeof item.id !== "string") {
+    throw new RangeError("FileItem.id must be a string")
+  }
+
+  if (!Number.isFinite(item.weight) || item.weight < 0) {
+    throw new RangeError("FileItem.weight must be a finite number >= 0")
+  }
+}
+
+function extensionType(item: VisualizerCellInput): string {
+  switch (item.kind) {
+    case "volume":
+      return "volume"
+    case "directory":
+      return "directory"
+    case "other":
+      return "other"
+    case "file":
+      return fileExtension(item.label || item.path)
+  }
+}
+
+function fileExtension(value: string) {
+  const name = value.split(/[\\/]/).filter(Boolean).at(-1) ?? value
+  const dotIndex = name.lastIndexOf(".")
+  if (dotIndex <= 0 || dotIndex === name.length - 1) {
+    return "extensionless"
+  }
+
+  return name.slice(dotIndex + 1).toLowerCase()
+}
+
+function createVoronoiDebugInput(snapshot: VisualizerLevelSnapshot, clusterResult: ClusterResult) {
+  const valid = clusterResult.sites.flatMap((site) => site.members)
+  const weights = valid.map((item) => item.weight)
+  const sortedSites = [...clusterResult.sites].sort((left, right) => right.weight - left.weight)
+
+  return {
+    summary: {
+      path: snapshot.path,
+      parentPath: snapshot.parentPath,
+      rawItemCount: snapshot.items.length,
+      validItemCount: valid.length,
+      droppedZeroWeightCount: clusterResult.dropped.length,
+      siteCount: clusterResult.sites.length,
+      clusterCount: clusterResult.sites.filter((site) => site.isCluster).length,
+      overflowCount: clusterResult.overflowCount,
+      minVisible: clusterResult.minVisible,
+      totalWeight: clusterResult.totalWeight,
+      minWeight: weights.length > 0 ? Math.min(...weights) : 0,
+      maxWeight: weights.length > 0 ? Math.max(...weights) : 0,
+      partitionType: PARTITION_TYPE,
+    },
+    largestSites: sortedSites.slice(0, 10).map(summarizeSite),
+    smallestSites: sortedSites.slice(-10).reverse().map(summarizeSite),
+  }
+}
+
+function summarizeSite(site: VoronoiSite) {
+  return {
+    id: site.id,
+    weight: site.weight,
+    memberCount: site.members.length,
+    isCluster: site.isCluster,
+    representativeId: site.representative.id,
+    representativeLabel: site.representative.source.label,
+    representativeType: site.representative.type,
+    sizeRangeMin: site.sizeRange[0],
+    sizeRangeMax: site.sizeRange[1],
+    overflowReason: site.overflowReason,
+    mixed: site.mixed,
+  }
+}
+
+function summarizeTreemapNode(node: TreemapNode) {
+  return {
+    depth: node.depth,
+    height: node.height,
+    value: node.value,
+    site: node.data.site ? summarizeSite(node.data.site) : undefined,
+    polygonPoints: node.polygon?.length ?? 0,
+    polygonSample: node.polygon?.slice(0, 3),
+  }
 }
 
 function createPalette() {
@@ -219,7 +799,7 @@ function drawContainedCells(
   context.save()
   drawCirclePath(context, circle)
   context.clip()
-  cells.forEach((cell) => drawPolygon(context, cell.polygon, colorForItem(cell.item, colors)))
+  cells.forEach((cell) => drawPolygon(context, cell.polygon, colorForSite(cell.site, colors)))
   context.restore()
 }
 
@@ -250,13 +830,13 @@ function drawCirclePath(context: CanvasRenderingContext2D, circle: CircleBounds)
   context.arc(circle.centerX, circle.centerY, circle.radius, 0, Math.PI * 2)
 }
 
-function colorForItem(item: WeightedCell, colors: string[]) {
-  return colors[hashString(item.id) % colors.length]
+function colorForSite(site: VoronoiSite, colors: string[]) {
+  return colors[hashString(site.id) % colors.length]
 }
 
-function hashLayout(snapshot: VisualizerLevelSnapshot, items: WeightedCell[]) {
-  return items.reduce(
-    (hash, item) => hash ^ hashString(`${item.id}:${item.path}`),
+function hashLayout(snapshot: VisualizerLevelSnapshot, sites: VoronoiSite[]) {
+  return sites.reduce(
+    (hash, site) => hash ^ hashString(`${site.id}:${site.weight}`),
     hashString(snapshot.path ?? "volumes") ^ DEFAULT_SEED,
   ) >>> 0
 }
