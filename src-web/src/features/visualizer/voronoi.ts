@@ -1,5 +1,3 @@
-import { hierarchy } from "d3-hierarchy"
-import type { HierarchyNode } from "d3-hierarchy"
 import { voronoiTreemap } from "d3-voronoi-treemap"
 
 import type { VisualizerCellInput, VisualizerLevelSnapshot } from "./types"
@@ -54,15 +52,29 @@ type VoronoiPoint = [number, number]
 
 type RenderCell = {
   site: VoronoiSite
+  item?: FileItem
   polygon: VoronoiPoint[]
 }
 
 type TreemapNodeData = {
   site?: VoronoiSite
-  children?: TreemapNodeData[]
+  item?: FileItem
 }
 
-type TreemapNode = HierarchyNode<TreemapNodeData> & {
+type TreemapNode = {
+  children?: TreemapNode[]
+  data: TreemapNodeData
+  depth: number
+  height: number
+  parent: TreemapNode | null
+  polygon?: VoronoiPoint[]
+  value: number
+}
+
+type TreemapLeafNode = TreemapNode & {
+  data: TreemapNodeData & {
+    site: VoronoiSite
+  }
   polygon?: VoronoiPoint[]
 }
 
@@ -80,11 +92,12 @@ type CircleBounds = {
 
 const MIN_AREA = 0.01
 const LOG_SPREAD = 4
-const MAX_MEMBERS = 128
+const MAX_MEMBERS = 64
 const MAX_SITES = 200
 const PARTITION_TYPE: PartitionType = "size"
 const ITERATIONS = 50
 const CONVERGENCE = 0.02
+const VORONOI_MIN_WEIGHT_RATIO = 0.00001
 
 const DEFAULT_PARAMS: NormalizedClusterParams = {
   visibilityThreshold: MIN_AREA,
@@ -170,7 +183,7 @@ function createCells(
   }
 
   if (clusterResult.sites.length === 1) {
-    return [createRenderCell(clusterResult.sites[0], boundary)]
+    return [createRenderCell(clusterResult.sites[0], boundary, clusterResult.sites[0].representative)]
   }
 
   const debugInput = createVoronoiDebugInput(snapshot, clusterResult)
@@ -180,25 +193,25 @@ function createCells(
   console.table(debugInput.smallestSites)
 
   try {
-    const root = hierarchy<TreemapNodeData>({
-      children: clusterResult.sites.map((site) => ({ site })),
-    }).sum((datum) => datum.site?.weight ?? 0) as TreemapNode
+    const root = createTreemapRoot(clusterResult.sites)
 
     const treemap = voronoiTreemap()
       .clip(boundary)
-      .minWeightRatio(MIN_AREA)
+      .minWeightRatio(VORONOI_MIN_WEIGHT_RATIO)
       .convergenceRatio(CONVERGENCE)
       .maxIterationCount(ITERATIONS)
       .prng(createRandom(hashLayout(snapshot, clusterResult.sites)))
     treemap(root)
 
-    const children = (root.children ?? []) as TreemapNode[]
+    const children = root.children ?? []
+    const leaves = collectLeafNodes(root)
     const childrenWithPolygons = children.filter((node) => node.polygon?.length)
     const childrenMissingPolygons = children.filter((node) => !node.polygon?.length)
-    const cells = children
+    const leavesWithPolygons = leaves.filter((node) => node.polygon?.length)
+    const leavesMissingPolygons = leaves.filter((node) => !node.polygon?.length)
+    const cells = leaves
       .map((node) => {
-        const site = node.data.site
-        return site && node.polygon ? createRenderCell(site, node.polygon) : undefined
+        return node.polygon ? createRenderCell(node.data.site, node.polygon, node.data.item) : undefined
       })
       .filter((cell): cell is RenderCell => Boolean(cell))
 
@@ -208,7 +221,11 @@ function createCells(
       childCount: children.length,
       childrenWithPolygons: childrenWithPolygons.length,
       childrenMissingPolygons: childrenMissingPolygons.length,
+      leafCount: leaves.length,
+      leavesWithPolygons: leavesWithPolygons.length,
+      leavesMissingPolygons: leavesMissingPolygons.length,
       sampleChildren: children.slice(0, 10).map(summarizeTreemapNode),
+      sampleLeaves: leaves.slice(0, 10).map(summarizeTreemapNode),
     })
     console.groupEnd()
 
@@ -227,11 +244,68 @@ function createCells(
   }
 }
 
-function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[]): RenderCell {
+function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[], item?: FileItem): RenderCell {
   return {
     site,
+    item,
     polygon: polygon.map(([x, y]): VoronoiPoint => [x, y]),
   }
+}
+
+function createTreemapRoot(sites: VoronoiSite[]): TreemapNode {
+  const root: TreemapNode = {
+    children: [],
+    data: {},
+    depth: 0,
+    height: 0,
+    parent: null,
+    value: sites.reduce((total, site) => total + site.weight, 0),
+  }
+
+  root.children = sites.map((site) => createSiteNode(site, root, 1))
+  root.height = root.children.length > 0 ? Math.max(...root.children.map((child) => child.height)) + 1 : 0
+  return root
+}
+
+function createSiteNode(site: VoronoiSite, parent: TreemapNode, depth: number): TreemapNode {
+  const shouldRenderAsClusterCell = !site.isCluster || Boolean(site.overflowReason)
+  const node: TreemapNode = {
+    data: {
+      site,
+      item: shouldRenderAsClusterCell ? site.representative : undefined,
+    },
+    depth,
+    height: shouldRenderAsClusterCell ? 0 : 1,
+    parent,
+    value: site.weight,
+  }
+
+  if (!shouldRenderAsClusterCell) {
+    node.children = site.members.map((item) => createItemNode(site, item, node, depth + 1))
+  }
+
+  return node
+}
+
+function createItemNode(site: VoronoiSite, item: FileItem, parent: TreemapNode, depth: number): TreemapNode {
+  return {
+    data: {
+      site,
+      item,
+    },
+    depth,
+    height: 0,
+    parent,
+    value: item.weight,
+  }
+}
+
+function collectLeafNodes(node: TreemapNode): TreemapLeafNode[] {
+  if (!node.children?.length) {
+    return node.data.site ? [node as TreemapLeafNode] : []
+  }
+
+  return node.children.flatMap(collectLeafNodes)
 }
 
 function createFileItems(items: VisualizerCellInput[]): FileItem[] {
@@ -739,6 +813,14 @@ function summarizeTreemapNode(node: TreemapNode) {
     height: node.height,
     value: node.value,
     site: node.data.site ? summarizeSite(node.data.site) : undefined,
+    item: node.data.item
+      ? {
+          id: node.data.item.id,
+          label: node.data.item.source.label,
+          type: node.data.item.type,
+          weight: node.data.item.weight,
+        }
+      : undefined,
     polygonPoints: node.polygon?.length ?? 0,
     polygonSample: node.polygon?.slice(0, 3),
   }
@@ -799,7 +881,7 @@ function drawContainedCells(
   context.save()
   drawCirclePath(context, circle)
   context.clip()
-  cells.forEach((cell) => drawPolygon(context, cell.polygon, colorForSite(cell.site, colors)))
+  cells.forEach((cell) => drawPolygon(context, cell.polygon, colorForCell(cell, colors)))
   context.restore()
 }
 
@@ -830,8 +912,9 @@ function drawCirclePath(context: CanvasRenderingContext2D, circle: CircleBounds)
   context.arc(circle.centerX, circle.centerY, circle.radius, 0, Math.PI * 2)
 }
 
-function colorForSite(site: VoronoiSite, colors: string[]) {
-  return colors[hashString(site.id) % colors.length]
+function colorForCell(cell: RenderCell, colors: string[]) {
+  const key = cell.item && !cell.site.overflowReason ? cell.item.id : cell.site.id
+  return colors[hashString(key) % colors.length]
 }
 
 function hashLayout(snapshot: VisualizerLevelSnapshot, sites: VoronoiSite[]) {
