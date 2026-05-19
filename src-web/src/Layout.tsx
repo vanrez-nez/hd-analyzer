@@ -9,6 +9,7 @@ import {
 import { FsExplorer } from "@/features/fs-explorer/FsExplorer"
 import { Visualizer } from "@/features/visualizer/Visualizer"
 import type { VisualizerLevelSnapshot } from "@/features/visualizer/types"
+import { cn } from "@/lib/utils"
 
 type SplitLayout = {
   explorer: number
@@ -50,7 +51,7 @@ export function Layout() {
   return (
     <ResizablePanelGroup
       direction="horizontal"
-      className="h-full min-h-0 flex-1"
+      className={cn("h-full min-h-0 flex-1", splitOpen && "gap-2")}
       defaultLayout={splitLayout}
       onLayoutChanged={(layout) => {
         if (!splitOpen || layout.visualizer === undefined || layout.visualizer === 0) {

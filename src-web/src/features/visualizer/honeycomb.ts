@@ -7,8 +7,8 @@ import {
 import type { VisualizerLayout, VisualizerLayoutCell, VisualizerPoint } from "./voronoi"
 
 export const HONEYCOMB_MIN_CELL_AREA = 1
-export const HONEYCOMB_MIN_SEPARATION = 1
-export const HONEYCOMB_MAX_SEPARATION = 3
+export const HONEYCOMB_MIN_SEPARATION = 2
+export const HONEYCOMB_MAX_SEPARATION = 4
 export const HONEYCOMB_MIN_SMOOTH = 0.35
 export const HONEYCOMB_MAX_SMOOTH = 1
 export const HONEYCOMB_MIN_RESAMPLE_SPACING = 3
