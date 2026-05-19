@@ -48,7 +48,34 @@ type ClusterResult = {
   overflowCount: number
 }
 
-type VoronoiPoint = [number, number]
+export type VisualizerPoint = [number, number]
+
+export type VisualizerCircle = {
+  centerX: number
+  centerY: number
+  radius: number
+}
+
+export type VisualizerLayoutCell = {
+  id: string
+  label: string
+  path: string
+  kind: VisualizerCellInput["kind"]
+  size: number
+  state?: string
+  polygon: VisualizerPoint[]
+  colorKey: string
+  fillColor: string
+}
+
+export type VisualizerLayout = {
+  generation: string
+  path: string | null
+  circle: VisualizerCircle
+  cells: VisualizerLayoutCell[]
+}
+
+type VoronoiPoint = VisualizerPoint
 
 type RenderCell = {
   site: VoronoiSite
@@ -78,17 +105,7 @@ type TreemapLeafNode = TreemapNode & {
   polygon?: VoronoiPoint[]
 }
 
-type VoronoiLayout = {
-  generation: string
-  path: string | null
-  cells: RenderCell[]
-}
-
-type CircleBounds = {
-  centerX: number
-  centerY: number
-  radius: number
-}
+type CircleBounds = VisualizerCircle
 
 const MIN_AREA = 0.01
 const LOG_SPREAD = 4
@@ -117,7 +134,7 @@ function isTypePartition(partitionType: PartitionType) {
 export class Voronoi {
   private readonly circle: CircleBounds
   private readonly colors: string[]
-  private currentLayout: VoronoiLayout
+  private currentLayout: VisualizerLayout
   private readonly fullBoundary: VoronoiPoint[]
   private readonly height: number
   private readonly width: number
@@ -128,7 +145,8 @@ export class Voronoi {
     this.circle = createCircleBounds(this.width, this.height)
     this.fullBoundary = createCircleBoundary(this.circle)
     this.colors = createPalette()
-    this.currentLayout = createLayout(snapshot, this.fullBoundary) ?? createEmptyLayout(snapshot)
+    this.currentLayout =
+      createLayout(snapshot, this.fullBoundary, this.circle, this.colors) ?? createEmptyLayout(snapshot, this.circle)
   }
 
   setSnapshot(snapshot: VisualizerLevelSnapshot) {
@@ -136,39 +154,63 @@ export class Voronoi {
       return
     }
 
-    const nextLayout = createLayout(snapshot, this.fullBoundary)
+    const nextLayout = createLayout(snapshot, this.fullBoundary, this.circle, this.colors)
     if (nextLayout) {
       this.currentLayout = nextLayout
     }
   }
 
+  getLayout(snapshot: VisualizerLevelSnapshot) {
+    this.setSnapshot(snapshot)
+    return this.currentLayout
+  }
+
   draw(context: CanvasRenderingContext2D) {
+    this.drawBackground(context)
+    this.drawDebugBase(context)
+    this.drawFrame(context)
+    return false
+  }
+
+  drawBackground(context: CanvasRenderingContext2D) {
     context.clearRect(0, 0, this.width, this.height)
     drawCircleBackground(context, this.circle)
-    drawContainedCells(context, this.circle, this.currentLayout.cells, this.colors)
-    drawCircleFrame(context, this.circle)
-    return false
+  }
+
+  drawDebugBase(context: CanvasRenderingContext2D, layout = this.currentLayout) {
+    drawContainedCells(context, layout.circle, layout.cells)
+  }
+
+  drawFrame(context: CanvasRenderingContext2D, layout = this.currentLayout) {
+    drawCircleFrame(context, layout.circle)
   }
 }
 
-function createLayout(snapshot: VisualizerLevelSnapshot, boundary: VoronoiPoint[]): VoronoiLayout | undefined {
+function createLayout(
+  snapshot: VisualizerLevelSnapshot,
+  boundary: VoronoiPoint[],
+  circle: CircleBounds,
+  colors: string[],
+): VisualizerLayout | undefined {
   const clusterResult = clusterForVoronoi(createFileItems(snapshot.items))
-  const cells = createCells(snapshot, boundary, clusterResult)
-  if (!cells) {
+  const renderCells = createCells(snapshot, boundary, clusterResult)
+  if (!renderCells) {
     return undefined
   }
 
   return {
     generation: snapshot.generation,
     path: snapshot.path,
-    cells,
+    circle,
+    cells: renderCells.map((cell) => createLayoutCell(cell, colors)),
   }
 }
 
-function createEmptyLayout(snapshot: VisualizerLevelSnapshot): VoronoiLayout {
+function createEmptyLayout(snapshot: VisualizerLevelSnapshot, circle: CircleBounds): VisualizerLayout {
   return {
     generation: snapshot.generation,
     path: snapshot.path,
+    circle,
     cells: [],
   }
 }
@@ -249,6 +291,23 @@ function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[], item?: Fil
     site,
     item,
     polygon: polygon.map(([x, y]): VoronoiPoint => [x, y]),
+  }
+}
+
+function createLayoutCell(cell: RenderCell, colors: string[]): VisualizerLayoutCell {
+  const source = cell.item?.source ?? cell.site.representative.source
+  const colorKey = cell.item && !cell.site.overflowReason ? cell.item.id : cell.site.id
+
+  return {
+    id: cell.site.overflowReason || !cell.item ? cell.site.id : cell.item.id,
+    label: source.label,
+    path: source.path,
+    kind: source.kind,
+    size: cell.item?.weight ?? cell.site.weight,
+    state: source.state,
+    polygon: cell.polygon.map(([x, y]): VisualizerPoint => [x, y]),
+    colorKey,
+    fillColor: colorForKey(colorKey, colors),
   }
 }
 
@@ -875,13 +934,12 @@ function drawCircleFrame(context: CanvasRenderingContext2D, circle: CircleBounds
 function drawContainedCells(
   context: CanvasRenderingContext2D,
   circle: CircleBounds,
-  cells: RenderCell[],
-  colors: string[],
+  cells: VisualizerLayoutCell[],
 ) {
   context.save()
   drawCirclePath(context, circle)
   context.clip()
-  cells.forEach((cell) => drawPolygon(context, cell.polygon, colorForCell(cell, colors)))
+  cells.forEach((cell) => drawPolygon(context, cell.polygon, cell.fillColor))
   context.restore()
 }
 
@@ -912,8 +970,7 @@ function drawCirclePath(context: CanvasRenderingContext2D, circle: CircleBounds)
   context.arc(circle.centerX, circle.centerY, circle.radius, 0, Math.PI * 2)
 }
 
-function colorForCell(cell: RenderCell, colors: string[]) {
-  const key = cell.item && !cell.site.overflowReason ? cell.item.id : cell.site.id
+function colorForKey(key: string, colors: string[]) {
   return colors[hashString(key) % colors.length]
 }
 

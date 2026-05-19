@@ -2,11 +2,14 @@ import { useEffect, useRef } from "react"
 import type { MutableRefObject } from "react"
 
 import type { VisualizerLevelSnapshot } from "./types"
+import { Honeycomb } from "./honeycomb"
 import { Voronoi } from "./voronoi"
 
 type VisualizerProps = {
   snapshot: VisualizerLevelSnapshot
 }
+
+const honeycomb = new Honeycomb()
 
 export function Visualizer({ snapshot }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -64,6 +67,10 @@ function drawVisualizer(
 
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
   voronoiRef.current ??= new Voronoi(width, height, snapshot)
-  voronoiRef.current.setSnapshot(snapshot)
-  return voronoiRef.current.draw(context)
+  const layout = voronoiRef.current.getLayout(snapshot)
+  voronoiRef.current.drawBackground(context)
+  // voronoiRef.current.drawDebugBase(context, layout)
+  honeycomb.draw(context, layout)
+  voronoiRef.current.drawFrame(context, layout)
+  return false
 }
