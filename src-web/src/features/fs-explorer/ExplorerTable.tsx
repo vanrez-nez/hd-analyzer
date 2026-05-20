@@ -3,8 +3,10 @@ import { ArrowDownIcon, ArrowUpIcon, FileIcon, Folder, HardDrive } from "lucide-
 
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { isToggleSelectionInput, rangeSelection, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
 import type { DeleteSafetyClassification, DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
+import type { MouseEvent } from "react"
 
 type SortColumn = "name" | "size"
 type SortDirection = "asc" | "desc"
@@ -20,10 +22,12 @@ type ExplorerTableProps = {
   volumes: DriveDto[]
   listing?: DirectoryListingDto
   loadingPath?: string
-  selectedItemId: string | null
+  selectedItemIds: string[]
+  selectionAnchorId: string | null
   onOpenVolume: (volume: DriveDto) => void
   onOpenNode: (node: PathNodeDto) => void
-  onSelectionChange: (itemId: string | null) => void
+  onSelectionAnchorChange: (itemId: string | null) => void
+  onSelectionChange: (itemIds: string[]) => void
 }
 
 export function ExplorerTable({
@@ -31,9 +35,11 @@ export function ExplorerTable({
   volumes,
   listing,
   loadingPath,
-  selectedItemId,
+  selectedItemIds,
+  selectionAnchorId,
   onOpenVolume,
   onOpenNode,
+  onSelectionAnchorChange,
   onSelectionChange,
 }: ExplorerTableProps) {
   const rowElementsRef = useRef(new Map<string, HTMLTableRowElement>())
@@ -41,6 +47,12 @@ export function ExplorerTable({
   const rows = useMemo(() => {
     return listing ? sortNodes(listing.children, sort) : sortVolumes(volumes, sort)
   }, [listing, sort, volumes])
+  const visibleItemIds = useMemo(() => {
+    return listing
+      ? (rows as PathNodeDto[]).map((node) => node.path)
+      : (rows as DriveDto[]).map((volume) => volume.id)
+  }, [listing, rows])
+  const selectedItemSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds])
   const setRowElement = useCallback((itemId: string, element: HTMLTableRowElement | null) => {
     if (element) {
       rowElementsRef.current.set(itemId, element)
@@ -51,15 +63,39 @@ export function ExplorerTable({
   }, [])
 
   useEffect(() => {
-    if (!selectedItemId) {
+    if (selectedItemIds.length === 0) {
       return
     }
 
-    rowElementsRef.current.get(selectedItemId)?.scrollIntoView({
+    const firstVisibleSelectedItemId = visibleItemIds.find((itemId) => selectedItemSet.has(itemId))
+    if (!firstVisibleSelectedItemId) {
+      return
+    }
+
+    rowElementsRef.current.get(firstVisibleSelectedItemId)?.scrollIntoView({
       block: "nearest",
       inline: "nearest",
     })
-  }, [rows, selectedItemId])
+  }, [selectedItemIds, selectedItemSet, visibleItemIds])
+
+  const selectRow = (itemId: string, event: MouseEvent<HTMLTableRowElement>) => {
+    if (event.shiftKey) {
+      onSelectionChange(rangeSelection(visibleItemIds, selectionAnchorId, itemId))
+      if (!selectionAnchorId) {
+        onSelectionAnchorChange(itemId)
+      }
+      return
+    }
+
+    if (isToggleSelectionInput(event)) {
+      onSelectionChange(toggleSelection(selectedItemIds, [itemId]))
+      onSelectionAnchorChange(itemId)
+      return
+    }
+
+    onSelectionChange(replaceSelection([itemId]))
+    onSelectionAnchorChange(itemId)
+  }
 
   const toggleSort = (column: SortColumn) => {
     setSort((current) => ({
@@ -87,7 +123,7 @@ export function ExplorerTable({
           <TableBody className="block">
             {!listing
               ? (rows as DriveDto[]).map((volume) => {
-                  const selected = selectedItemId === volume.id
+                  const selected = selectedItemSet.has(volume.id)
 
                   return (
                     <TableRow
@@ -95,7 +131,7 @@ export function ExplorerTable({
                       className={selectableRowClassName("cursor-pointer select-none", selected)}
                       key={volume.id}
                       ref={(element) => setRowElement(volume.id, element)}
-                      onClick={() => onSelectionChange(volume.id)}
+                      onClick={(event) => selectRow(volume.id, event)}
                       onDoubleClick={() => onOpenVolume(volume)}
                     >
                       <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
@@ -111,7 +147,7 @@ export function ExplorerTable({
                   )
                 })
               : (rows as PathNodeDto[]).map((node) => {
-                  const selected = selectedItemId === node.path
+                  const selected = selectedItemSet.has(node.path)
 
                   return (
                     <TableRow
@@ -123,7 +159,7 @@ export function ExplorerTable({
                       key={node.path}
                       ref={(element) => setRowElement(node.path, element)}
                       title={node.deleteSafety?.reason}
-                      onClick={() => onSelectionChange(node.path)}
+                      onClick={(event) => selectRow(node.path, event)}
                       onDoubleClick={() => {
                         if (node.kind === "directory") onOpenNode(node)
                       }}

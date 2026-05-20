@@ -39,7 +39,7 @@ const HONEYCOMB_SELECTED_STROKE_WIDTH = 2
 type HoneycombOptions = {
   colorScheme?: ColorScheme
   minCellArea?: number
-  selectedItemId?: string | null
+  selectedItemIds?: readonly string[]
   separation?: number
   smooth?: number
 }
@@ -49,7 +49,7 @@ type ResolvedHoneycombOptions = {
   minCellArea: number
   maxSeparation: number
   maxSmooth: number
-  selectedItemId: string | null
+  selectedItemIds: Set<string>
 }
 
 type HoneycombCellStyle = {
@@ -114,7 +114,7 @@ function drawHoneycombCell(
     return
   }
 
-  const selected = isSelectedCell(cell, options.selectedItemId)
+  const selected = isSelectedCell(cell, options.selectedItemIds)
 
   if (area < options.minCellArea) {
     drawInscribedCircle(context, cell, options, selected, undefined, layoutCircleArea)
@@ -540,7 +540,7 @@ function resolveOptions(options: HoneycombOptions): ResolvedHoneycombOptions {
     minCellArea: Math.max(0, options.minCellArea ?? HONEYCOMB_MIN_CELL_AREA),
     maxSeparation,
     maxSmooth: clamp(options.smooth ?? HONEYCOMB_MAX_SMOOTH, 0, 1),
-    selectedItemId: options.selectedItemId ?? null,
+    selectedItemIds: new Set(options.selectedItemIds ?? []),
   }
 }
 
@@ -601,12 +601,15 @@ function formatBytes(bytes: number) {
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value)} ${units[unit]}`
 }
 
-function isSelectedCell(cell: VisualizerLayoutCell, selectedItemId: string | null) {
-  return Boolean(
-    selectedItemId &&
-      (cell.id === selectedItemId ||
-        cell.selectionId === selectedItemId ||
-        cell.memberIds.includes(selectedItemId)),
+function isSelectedCell(cell: VisualizerLayoutCell, selectedItemIds: Set<string>) {
+  if (selectedItemIds.size === 0) {
+    return false
+  }
+
+  return (
+    selectedItemIds.has(cell.id) ||
+    selectedItemIds.has(cell.selectionId) ||
+    cell.memberIds.some((memberId) => selectedItemIds.has(memberId))
   )
 }
 

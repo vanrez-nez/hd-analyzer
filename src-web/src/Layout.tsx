@@ -28,7 +28,8 @@ type LayoutProps = {
 }
 
 export function Layout({ colorScheme }: LayoutProps) {
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
+  const [explorerSelectionAnchorId, setExplorerSelectionAnchorId] = useState<string | null>(null)
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitAnimating, setSplitAnimating] = useState(false)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(DEFAULT_SPLIT_LAYOUT)
@@ -148,9 +149,11 @@ export function Layout({ colorScheme }: LayoutProps) {
         className="flex min-h-0 min-w-0 overflow-hidden"
       >
         <FsExplorer
-          selectedItemId={selectedItemId}
+          explorerSelectionAnchorId={explorerSelectionAnchorId}
+          selectedItemIds={selectedItemIds}
           visualizerOpen={splitOpen}
-          onSelectionChange={setSelectedItemId}
+          onExplorerSelectionAnchorChange={setExplorerSelectionAnchorId}
+          onSelectionChange={setSelectedItemIds}
           onVisualizerToggle={handleVisualizerToggle}
           onVisualizerSnapshotChange={handleVisualizerSnapshotChange}
         />
@@ -170,9 +173,10 @@ export function Layout({ colorScheme }: LayoutProps) {
       >
         <Visualizer
           colorScheme={colorScheme}
-          selectedItemId={selectedItemId}
+          selectedItemIds={selectedItemIds}
           snapshot={visualizerSnapshot}
-          onSelectionChange={setSelectedItemId}
+          onExplorerSelectionAnchorChange={setExplorerSelectionAnchorId}
+          onSelectionChange={setSelectedItemIds}
         />
       </ResizablePanel>
     </ResizablePanelGroup>

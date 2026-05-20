@@ -4,32 +4,41 @@ import type { MouseEvent, MutableRefObject } from "react"
 import type { VisualizerLevelSnapshot } from "./types"
 import { Honeycomb } from "./honeycomb"
 import { Voronoi } from "./voronoi"
+import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import type { ColorScheme } from "@/lib/use-system-color-scheme"
+import type { VisualizerLayoutCell } from "./voronoi"
 
 type VisualizerProps = {
   colorScheme: ColorScheme
-  selectedItemId: string | null
+  selectedItemIds: string[]
   snapshot: VisualizerLevelSnapshot
-  onSelectionChange: (itemId: string | null) => void
+  onExplorerSelectionAnchorChange: (itemId: string | null) => void
+  onSelectionChange: (itemIds: string[]) => void
 }
 
 const honeycomb = new Honeycomb()
 const VISUALIZER_RESIZE_DEBOUNCE_MS = 100
 
-export function Visualizer({ colorScheme, selectedItemId, snapshot, onSelectionChange }: VisualizerProps) {
+export function Visualizer({
+  colorScheme,
+  selectedItemIds,
+  snapshot,
+  onExplorerSelectionAnchorChange,
+  onSelectionChange,
+}: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const voronoiRef = useRef<Voronoi | undefined>(undefined)
   const snapshotRef = useRef(snapshot)
   const colorSchemeRef = useRef(colorScheme)
-  const selectedItemIdRef = useRef(selectedItemId)
+  const selectedItemIdsRef = useRef(selectedItemIds)
 
   useEffect(() => {
     snapshotRef.current = snapshot
     colorSchemeRef.current = colorScheme
-    selectedItemIdRef.current = selectedItemId
-    drawVisualizer(canvasRef.current, wrapperRef.current, voronoiRef, snapshot, colorScheme, selectedItemId)
-  }, [colorScheme, selectedItemId, snapshot])
+    selectedItemIdsRef.current = selectedItemIds
+    drawVisualizer(canvasRef.current, wrapperRef.current, voronoiRef, snapshot, colorScheme, selectedItemIds)
+  }, [colorScheme, selectedItemIds, snapshot])
 
   useEffect(() => {
     let resizeTimeout: number | undefined
@@ -42,7 +51,7 @@ export function Visualizer({ colorScheme, selectedItemId, snapshot, onSelectionC
           voronoiRef,
           snapshotRef.current,
           colorSchemeRef.current,
-          selectedItemIdRef.current,
+          selectedItemIdsRef.current,
         )
       }, VISUALIZER_RESIZE_DEBOUNCE_MS)
     }
@@ -68,16 +77,17 @@ export function Visualizer({ colorScheme, selectedItemId, snapshot, onSelectionC
         className="absolute left-1/2 top-1/2 block -translate-x-1/2 -translate-y-1/2"
         aria-label="Visualizer canvas"
         onClick={(event) => {
-          onSelectionChange(
-            selectedCellIdAtPoint(
-              event,
-              canvasRef.current,
-              wrapperRef.current,
-              voronoiRef,
-              snapshotRef.current,
-              colorSchemeRef.current,
-            ),
+          const cell = selectedCellAtPoint(
+            event,
+            canvasRef.current,
+            wrapperRef.current,
+            voronoiRef,
+            snapshotRef.current,
+            colorSchemeRef.current,
           )
+          const nextSelection = selectionForCellClick(selectedItemIdsRef.current, cell, event)
+          onSelectionChange(nextSelection)
+          onExplorerSelectionAnchorChange(nextSelection[0] ?? null)
         }}
       />
       <div className="pointer-events-none absolute right-2 top-2 text-xs tabular-nums text-muted-foreground">
@@ -93,7 +103,7 @@ function drawVisualizer(
   voronoiRef: MutableRefObject<Voronoi | undefined>,
   snapshot: VisualizerLevelSnapshot,
   colorScheme: ColorScheme,
-  selectedItemId: string | null,
+  selectedItemIds: string[],
 ) {
   const renderState = prepareVisualizer(canvas, wrapper, voronoiRef, snapshot, colorScheme)
   if (!renderState) {
@@ -104,7 +114,7 @@ function drawVisualizer(
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
   voronoi.drawBackground(context)
   // voronoi.drawDebugBase(context, layout)
-  honeycomb.draw(context, layout, { colorScheme, selectedItemId })
+  honeycomb.draw(context, layout, { colorScheme, selectedItemIds })
   voronoi.drawFrame(context, layout)
   return false
 }
@@ -149,7 +159,7 @@ function prepareVisualizer(
   }
 }
 
-function selectedCellIdAtPoint(
+function selectedCellAtPoint(
   event: MouseEvent<HTMLCanvasElement>,
   canvas: HTMLCanvasElement | null,
   wrapper: HTMLDivElement | null,
@@ -159,12 +169,28 @@ function selectedCellIdAtPoint(
 ) {
   const renderState = prepareVisualizer(canvas, wrapper, voronoiRef, snapshot, colorScheme)
   if (!renderState || !canvas) {
-    return null
+    return undefined
   }
 
   const point = canvasPointFromEvent(event, canvas)
-  const cell = honeycomb.hitTest(renderState.layout, point, { colorScheme })
-  return cell?.selectionId ?? null
+  return honeycomb.hitTest(renderState.layout, point, { colorScheme })
+}
+
+function selectionForCellClick(
+  currentSelection: string[],
+  cell: VisualizerLayoutCell | undefined,
+  event: MouseEvent<HTMLCanvasElement>,
+) {
+  if (!cell) {
+    return []
+  }
+
+  const memberIds = cell.memberIds.length > 0 ? cell.memberIds : [cell.selectionId]
+  if (isToggleSelectionInput(event)) {
+    return toggleSelection(currentSelection, memberIds)
+  }
+
+  return replaceSelection(memberIds)
 }
 
 function canvasPointFromEvent(event: MouseEvent<HTMLCanvasElement>, canvas: HTMLCanvasElement) {
