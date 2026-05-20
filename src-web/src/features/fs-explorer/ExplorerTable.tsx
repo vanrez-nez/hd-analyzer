@@ -13,6 +13,8 @@ type SortState = {
   direction: SortDirection
 }
 
+const ROW_ICON_CLASS = "size-3.5 shrink-0"
+
 type ExplorerTableProps = {
   className?: string
   volumes: DriveDto[]
@@ -46,8 +48,8 @@ export function ExplorerTable({
     <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border", className)}>
       <Table className="block w-full">
         <TableHeader className="block">
-          <TableRow className={tableRowClassName()}>
-            <SortableHead column="name" sort={sort} onSort={toggleSort} className="w-full max-w-0">
+          <TableRow className={tableRowClassName("hover:bg-transparent")}>
+            <SortableHead column="name" sort={sort} onSort={toggleSort} className="min-w-0">
               Name
             </SortableHead>
             <SortableHead column="size" sort={sort} onSort={toggleSort} className="whitespace-nowrap text-right" align="right">
@@ -64,7 +66,7 @@ export function ExplorerTable({
                   <TableRow className={tableRowClassName("cursor-pointer select-none")} key={volume.id} onClick={() => onOpenVolume(volume)}>
                     <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
                       <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                        <HardDrive data-icon="inline-start" />
+                        <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
                         <span className="truncate" title={volume.label}>
                           {volume.label}
                         </span>
@@ -87,10 +89,10 @@ export function ExplorerTable({
                         {node.kind === "directory" ? (
                           <Folder
                             data-icon="inline-start"
-                            className={cn("size-3.5", safetyIconClass(node.deleteSafety?.classification))}
+                            className={cn(ROW_ICON_CLASS, safetyIconClass(node.deleteSafety?.classification))}
                           />
                         ) : (
-                          <FileIcon data-icon="inline-start" className="size-3.5 opacity-50" />
+                          <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
                         )}
                         <span
                           className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
@@ -169,7 +171,7 @@ function SortableHead({ align = "left", children, className, column, onSort, sor
     <TableHead
       aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
       className={cn(
-        "cursor-pointer select-none whitespace-nowrap bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "cursor-pointer select-none whitespace-nowrap bg-background transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
       onClick={() => onSort(column)}
