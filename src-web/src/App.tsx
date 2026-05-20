@@ -18,7 +18,7 @@ export function App() {
 
   return (
     <main className="flex h-screen min-h-0 flex-col gap-4 overflow-hidden p-6">
-      <div className="flex justify-end">
+      <div className="flex min-h-9 items-center justify-end gap-3">
         <Button variant="secondary" disabled={permissionChecking} onClick={handleRequestPermissions}>
           <ShieldCheck data-icon="inline-start" />
           Permissions
