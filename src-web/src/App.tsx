@@ -3,9 +3,11 @@ import { ShieldCheck } from "lucide-react"
 import { requestMacFilePermissions } from "./api"
 import { Button } from "@/components/ui/button"
 import { Layout } from "./Layout"
+import { useSystemColorScheme } from "@/lib/use-system-color-scheme"
 
 export function App() {
   const [permissionChecking, setPermissionChecking] = useState(false)
+  const colorScheme = useSystemColorScheme()
 
   const handleRequestPermissions = () => {
     setPermissionChecking(true)
@@ -22,7 +24,7 @@ export function App() {
           Permissions
         </Button>
       </div>
-      <Layout />
+      <Layout colorScheme={colorScheme} />
     </main>
   )
 }

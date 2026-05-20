@@ -9,6 +9,7 @@ import {
 import { FsExplorer } from "@/features/fs-explorer/FsExplorer"
 import { Visualizer } from "@/features/visualizer/Visualizer"
 import type { VisualizerLevelSnapshot } from "@/features/visualizer/types"
+import type { ColorScheme } from "@/lib/use-system-color-scheme"
 import { cn } from "@/lib/utils"
 
 type SplitLayout = {
@@ -21,7 +22,11 @@ const DEFAULT_SPLIT_LAYOUT: SplitLayout = {
   visualizer: 70,
 }
 
-export function Layout() {
+type LayoutProps = {
+  colorScheme: ColorScheme
+}
+
+export function Layout({ colorScheme }: LayoutProps) {
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(DEFAULT_SPLIT_LAYOUT)
   const [visualizerSnapshot, setVisualizerSnapshot] = useState<VisualizerLevelSnapshot>({
@@ -87,7 +92,7 @@ export function Layout() {
         panelRef={visualizerPanelRef}
         className="min-h-0 min-w-0 overflow-hidden"
       >
-        <Visualizer snapshot={visualizerSnapshot} />
+        <Visualizer colorScheme={colorScheme} snapshot={visualizerSnapshot} />
       </ResizablePanel>
     </ResizablePanelGroup>
   )

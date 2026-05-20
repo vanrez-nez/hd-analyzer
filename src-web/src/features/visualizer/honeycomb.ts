@@ -4,6 +4,7 @@ import {
   insetConvexPolygon,
   polygonAbsArea,
 } from "./clipper"
+import type { ColorScheme } from "@/lib/use-system-color-scheme"
 import type { VisualizerLayout, VisualizerLayoutCell, VisualizerPoint } from "./voronoi"
 
 export const HONEYCOMB_MIN_CELL_AREA = 1
@@ -28,14 +29,17 @@ const SMOOTH_EPSILON = 0.000001
 const LABEL_AREA_RATIO = 0.82
 const LABEL_HEIGHT_RATIO = 0.78
 const LABEL_LINE_HEIGHT = 1.15
+const HONEYCOMB_FALLBACK_STROKE = "hsl(0 0% 100% / 0.24)"
 
 type HoneycombOptions = {
+  colorScheme?: ColorScheme
   minCellArea?: number
   separation?: number
   smooth?: number
 }
 
 type ResolvedHoneycombOptions = {
+  colorScheme: ColorScheme
   minCellArea: number
   maxSeparation: number
   maxSmooth: number
@@ -76,14 +80,14 @@ function drawHoneycombCell(
   }
 
   if (area < options.minCellArea) {
-    drawInscribedCircle(context, cell, undefined, layoutCircleArea)
+    drawInscribedCircle(context, cell, options.colorScheme, undefined, layoutCircleArea)
     return
   }
 
   const style = resolveCellStyle(area, options)
   const inset = insetConvexPolygon(cell.polygon, style.separation)
   if (!inset || polygonAbsArea(inset) < options.minCellArea) {
-    drawInscribedCircle(context, cell, undefined, layoutCircleArea)
+    drawInscribedCircle(context, cell, options.colorScheme, undefined, layoutCircleArea)
     return
   }
 
@@ -91,13 +95,21 @@ function drawHoneycombCell(
     drawInsetDebug(context, cell.polygon, inset, style.separation)
   }
 
-  drawSmoothPolygon(context, inset, cell.fillColor, style.smooth, style.resampleSpacing)
+  drawSmoothPolygon(
+    context,
+    inset,
+    cell.fillColor,
+    borderColorForCell(cell.fillColor, options.colorScheme),
+    style.smooth,
+    style.resampleSpacing,
+  )
   drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea)
 }
 
 function drawInscribedCircle(
   context: CanvasRenderingContext2D,
   cell: VisualizerLayoutCell,
+  colorScheme: ColorScheme,
   circle = approximateInscribedCircle(cell.polygon),
   layoutCircleArea = Infinity,
 ) {
@@ -111,7 +123,7 @@ function drawInscribedCircle(
   context.fillStyle = cell.fillColor
   context.globalAlpha = 0.92
   context.fill()
-  context.strokeStyle = "hsl(0 0% 100% / 0.28)"
+  context.strokeStyle = borderColorForCell(cell.fillColor, colorScheme)
   context.lineWidth = 1
   context.stroke()
   context.restore()
@@ -166,6 +178,7 @@ function drawSmoothPolygon(
   context: CanvasRenderingContext2D,
   polygon: VisualizerPoint[],
   fillStyle: string,
+  strokeStyle: string,
   smooth: number,
   resampleSpacing: number,
 ) {
@@ -175,7 +188,7 @@ function drawSmoothPolygon(
   }
 
   if (smooth <= 0.01) {
-    drawLinearPolygon(context, points, fillStyle)
+    drawLinearPolygon(context, points, fillStyle, strokeStyle)
     return
   }
 
@@ -216,13 +229,18 @@ function drawSmoothPolygon(
   context.fillStyle = fillStyle
   context.globalAlpha = 0.92
   context.fill()
-  context.strokeStyle = "hsl(0 0% 100% / 0.24)"
+  context.strokeStyle = strokeStyle
   context.lineWidth = 1
   context.stroke()
   context.restore()
 }
 
-function drawLinearPolygon(context: CanvasRenderingContext2D, polygon: VisualizerPoint[], fillStyle: string) {
+function drawLinearPolygon(
+  context: CanvasRenderingContext2D,
+  polygon: VisualizerPoint[],
+  fillStyle: string,
+  strokeStyle: string,
+) {
   const points = cleanDrawPolygon(polygon)
   if (points.length < 3) {
     return
@@ -242,7 +260,7 @@ function drawLinearPolygon(context: CanvasRenderingContext2D, polygon: Visualize
   context.fillStyle = fillStyle
   context.globalAlpha = 0.92
   context.fill()
-  context.strokeStyle = "hsl(0 0% 100% / 0.24)"
+  context.strokeStyle = strokeStyle
   context.lineWidth = 1
   context.stroke()
   context.restore()
@@ -390,6 +408,7 @@ function resolveOptions(options: HoneycombOptions): ResolvedHoneycombOptions {
   const maxSeparation = Math.max(0, options.separation ?? HONEYCOMB_MAX_SEPARATION)
 
   return {
+    colorScheme: options.colorScheme ?? "light",
     minCellArea: Math.max(0, options.minCellArea ?? HONEYCOMB_MIN_CELL_AREA),
     maxSeparation,
     maxSmooth: clamp(options.smooth ?? HONEYCOMB_MAX_SMOOTH, 0, 1),
@@ -451,6 +470,42 @@ function formatBytes(bytes: number) {
 
   const maximumFractionDigits = unit === 0 ? 0 : 2
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value)} ${units[unit]}`
+}
+
+function borderColorForCell(fillStyle: string, colorScheme: ColorScheme) {
+  const color = parseHslColor(fillStyle)
+  if (!color) {
+    return HONEYCOMB_FALLBACK_STROKE
+  }
+
+  const lightnessAdjustment = colorScheme === "dark" ? 10 : -10
+  const lightness = clamp(color.lightness + lightnessAdjustment, 0, 100)
+  return `hsl(${color.hue} ${color.saturation}% ${lightness}% / ${color.alpha})`
+}
+
+function parseHslColor(value: string) {
+  const match = value
+    .trim()
+    .match(/^hsl\(\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)%\s+([-+]?\d*\.?\d+)%(?:\s*\/\s*([^)]+?))?\s*\)$/)
+
+  if (!match) {
+    return undefined
+  }
+
+  const hue = Number.parseFloat(match[1])
+  const saturation = Number.parseFloat(match[2])
+  const lightness = Number.parseFloat(match[3])
+  const alpha = match[4]?.trim() || "1"
+  if (![hue, saturation, lightness].every(Number.isFinite)) {
+    return undefined
+  }
+
+  return {
+    alpha,
+    hue,
+    lightness,
+    saturation,
+  }
 }
 
 function clamp(value: number, min: number, max: number) {
