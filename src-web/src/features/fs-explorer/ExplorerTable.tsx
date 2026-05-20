@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDownIcon, ArrowUpIcon, FileIcon, Folder, HardDrive } from "lucide-react"
 
 import { Spinner } from "@/components/ui/spinner"
@@ -20,8 +20,10 @@ type ExplorerTableProps = {
   volumes: DriveDto[]
   listing?: DirectoryListingDto
   loadingPath?: string
+  selectedItemId: string | null
   onOpenVolume: (volume: DriveDto) => void
   onOpenNode: (node: PathNodeDto) => void
+  onSelectionChange: (itemId: string | null) => void
 }
 
 export function ExplorerTable({
@@ -29,13 +31,35 @@ export function ExplorerTable({
   volumes,
   listing,
   loadingPath,
+  selectedItemId,
   onOpenVolume,
   onOpenNode,
+  onSelectionChange,
 }: ExplorerTableProps) {
+  const rowElementsRef = useRef(new Map<string, HTMLTableRowElement>())
   const [sort, setSort] = useState<SortState>({ column: "size", direction: "desc" })
   const rows = useMemo(() => {
     return listing ? sortNodes(listing.children, sort) : sortVolumes(volumes, sort)
   }, [listing, sort, volumes])
+  const setRowElement = useCallback((itemId: string, element: HTMLTableRowElement | null) => {
+    if (element) {
+      rowElementsRef.current.set(itemId, element)
+      return
+    }
+
+    rowElementsRef.current.delete(itemId)
+  }, [])
+
+  useEffect(() => {
+    if (!selectedItemId) {
+      return
+    }
+
+    rowElementsRef.current.get(selectedItemId)?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    })
+  }, [rows, selectedItemId])
 
   const toggleSort = (column: SortColumn) => {
     setSort((current) => ({
@@ -62,49 +86,70 @@ export function ExplorerTable({
         <Table className="block w-full">
           <TableBody className="block">
             {!listing
-              ? (rows as DriveDto[]).map((volume) => (
-                  <TableRow className={tableRowClassName("cursor-pointer select-none")} key={volume.id} onClick={() => onOpenVolume(volume)}>
-                    <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
-                      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                        <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
-                        <span className="truncate" title={volume.label}>
-                          {volume.label}
+              ? (rows as DriveDto[]).map((volume) => {
+                  const selected = selectedItemId === volume.id
+
+                  return (
+                    <TableRow
+                      aria-selected={selected}
+                      className={selectableRowClassName("cursor-pointer select-none", selected)}
+                      key={volume.id}
+                      ref={(element) => setRowElement(volume.id, element)}
+                      onClick={() => onSelectionChange(volume.id)}
+                      onDoubleClick={() => onOpenVolume(volume)}
+                    >
+                      <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
+                        <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                          <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
+                          <span className="truncate" title={volume.label}>
+                            {volume.label}
+                          </span>
                         </span>
-                      </span>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right">{formatBytes(volume.usedSpace)}</TableCell>
-                  </TableRow>
-                ))
-              : (rows as PathNodeDto[]).map((node) => (
-                  <TableRow
-                    className={tableRowClassName(node.kind === "directory" ? "cursor-pointer select-none" : "select-none")}
-                    key={node.path}
-                    title={node.deleteSafety?.reason}
-                    onDoubleClick={() => {
-                      if (node.kind === "directory") onOpenNode(node)
-                    }}
-                  >
-                    <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
-                      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                        {node.kind === "directory" ? (
-                          <Folder
-                            data-icon="inline-start"
-                            className={cn(ROW_ICON_CLASS, safetyIconClass(node.deleteSafety?.classification))}
-                          />
-                        ) : (
-                          <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
-                        )}
-                        <span
-                          className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
-                          title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
-                        >
-                          {node.name}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">{formatBytes(volume.usedSpace)}</TableCell>
+                    </TableRow>
+                  )
+                })
+              : (rows as PathNodeDto[]).map((node) => {
+                  const selected = selectedItemId === node.path
+
+                  return (
+                    <TableRow
+                      aria-selected={selected}
+                      className={selectableRowClassName(
+                        node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
+                        selected,
+                      )}
+                      key={node.path}
+                      ref={(element) => setRowElement(node.path, element)}
+                      title={node.deleteSafety?.reason}
+                      onClick={() => onSelectionChange(node.path)}
+                      onDoubleClick={() => {
+                        if (node.kind === "directory") onOpenNode(node)
+                      }}
+                    >
+                      <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
+                        <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                          {node.kind === "directory" ? (
+                            <Folder
+                              data-icon="inline-start"
+                              className={cn(ROW_ICON_CLASS, safetyIconClass(node.deleteSafety?.classification))}
+                            />
+                          ) : (
+                            <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
+                          )}
+                          <span
+                            className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
+                            title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
+                          >
+                            {node.name}
+                          </span>
                         </span>
-                      </span>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right">{renderNodeSize(node, loadingPath)}</TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right">{renderNodeSize(node, loadingPath)}</TableCell>
+                    </TableRow>
+                  )
+                })}
           </TableBody>
         </Table>
       </div>
@@ -114,6 +159,10 @@ export function ExplorerTable({
 
 function tableRowClassName(className?: string) {
   return cn("grid grid-cols-[minmax(0,1fr)_max-content]", className)
+}
+
+function selectableRowClassName(className: string, selected: boolean) {
+  return tableRowClassName(cn(className, selected && "bg-muted/50 hover:bg-muted/50"))
 }
 
 function safetyTextClass(classification?: DeleteSafetyClassification) {

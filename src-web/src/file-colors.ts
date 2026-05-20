@@ -117,3 +117,47 @@ export function fileColorGroupForExtension(extension: string): FileColorGroup {
 export function fileColorForGroup(group: FileColorGroup, colorScheme: ColorScheme) {
   return FILE_GROUP_COLORS[colorScheme][group]
 }
+
+export function adjustColorForTheme(value: string, colorScheme: ColorScheme, lightnessAmount: number) {
+  const color = parseHslColor(value)
+  if (!color) {
+    return undefined
+  }
+
+  const lightnessAdjustment = colorScheme === "dark" ? lightnessAmount : -lightnessAmount
+  const lightness = clamp(color.lightness + lightnessAdjustment, 0, 100)
+  return `hsl(${color.hue} ${color.saturation}% ${lightness}% / ${color.alpha})`
+}
+
+function parseHslColor(value: string) {
+  const match = value
+    .trim()
+    .match(/^hsl\(\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)%\s+([-+]?\d*\.?\d+)%(?:\s*\/\s*([^)]+?))?\s*\)$/)
+
+  if (!match) {
+    return undefined
+  }
+
+  const hue = Number.parseFloat(match[1])
+  const saturation = Number.parseFloat(match[2])
+  const lightness = Number.parseFloat(match[3])
+  const alpha = match[4]?.trim() || "1"
+  if (![hue, saturation, lightness].every(Number.isFinite)) {
+    return undefined
+  }
+
+  return {
+    alpha,
+    hue,
+    lightness,
+    saturation,
+  }
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return min
+  }
+
+  return Math.min(max, Math.max(min, value))
+}

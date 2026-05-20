@@ -24,15 +24,19 @@ import { defaultScanConfig } from "./types"
 type LiveDirectoryUpdates = Record<string, Record<string, DirectoryProgressUpdateDto>>
 
 type FsExplorerProps = {
+  selectedItemId: string | null
   tableClassName?: string
   visualizerOpen: boolean
+  onSelectionChange: (itemId: string | null) => void
   onVisualizerToggle: () => void
   onVisualizerSnapshotChange?: (snapshot: VisualizerLevelSnapshot) => void
 }
 
 export function FsExplorer({
+  selectedItemId,
   tableClassName,
   visualizerOpen,
+  onSelectionChange,
   onVisualizerToggle,
   onVisualizerSnapshotChange,
 }: FsExplorerProps) {
@@ -299,8 +303,10 @@ export function FsExplorer({
         volumes={volumes}
         listing={displayListing}
         loadingPath={loadingPath}
+        selectedItemId={selectedItemId}
         onOpenVolume={openVolume}
         onOpenNode={openNode}
+        onSelectionChange={onSelectionChange}
       />
     </section>
   )

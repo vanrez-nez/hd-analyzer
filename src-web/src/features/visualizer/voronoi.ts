@@ -68,6 +68,8 @@ export type VisualizerLayoutCell = {
   label: string
   path: string
   kind: VisualizerCellInput["kind"]
+  memberIds: string[]
+  selectionId: string
   size: number
   state?: string
   polygon: VisualizerPoint[]
@@ -314,12 +316,16 @@ function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[], item?: Fil
 function createLayoutCell(cell: RenderCell, colorScheme: ColorScheme): VisualizerLayoutCell {
   const source = cell.item?.source ?? cell.site.representative.source
   const colorGroup = colorGroupForRenderCell(cell)
+  const directItem = cell.site.overflowReason ? undefined : cell.item
+  const selectionId = directItem ? directItem.id : cell.site.id
 
   return {
-    id: cell.site.overflowReason || !cell.item ? cell.site.id : cell.item.id,
+    id: selectionId,
     label: source.label,
     path: source.path,
     kind: source.kind,
+    memberIds: directItem ? [directItem.id] : cell.site.members.map((member) => member.id),
+    selectionId,
     size: cell.item?.weight ?? cell.site.weight,
     state: source.state,
     polygon: cell.polygon.map(([x, y]): VisualizerPoint => [x, y]),
