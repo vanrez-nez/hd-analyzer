@@ -80,7 +80,7 @@ export function ExplorerTable({
                     className={tableRowClassName(node.kind === "directory" ? "cursor-pointer select-none" : "select-none")}
                     key={node.path}
                     title={node.deleteSafety?.reason}
-                    onClick={() => {
+                    onDoubleClick={() => {
                       if (node.kind === "directory") onOpenNode(node)
                     }}
                   >
