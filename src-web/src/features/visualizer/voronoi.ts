@@ -1,5 +1,11 @@
 import { voronoiTreemap } from "d3-voronoi-treemap"
 
+import {
+  fileColorForGroup,
+  fileColorGroupForInput,
+  fileExtension,
+} from "./file-colors"
+import type { FileColorGroup } from "./file-colors"
 import type { VisualizerCellInput, VisualizerLevelSnapshot } from "./types"
 
 type PartitionType = "size" | "type"
@@ -64,7 +70,7 @@ export type VisualizerLayoutCell = {
   size: number
   state?: string
   polygon: VisualizerPoint[]
-  colorKey: string
+  colorGroup: FileColorGroup
   fillColor: string
 }
 
@@ -133,7 +139,6 @@ function isTypePartition(partitionType: PartitionType) {
 
 export class Voronoi {
   private readonly circle: CircleBounds
-  private readonly colors: string[]
   private currentLayout: VisualizerLayout
   private readonly fullBoundary: VoronoiPoint[]
   private readonly height: number
@@ -144,9 +149,8 @@ export class Voronoi {
     this.height = Math.max(1, height)
     this.circle = createCircleBounds(this.width, this.height)
     this.fullBoundary = createCircleBoundary(this.circle)
-    this.colors = createPalette()
     this.currentLayout =
-      createLayout(snapshot, this.fullBoundary, this.circle, this.colors) ?? createEmptyLayout(snapshot, this.circle)
+      createLayout(snapshot, this.fullBoundary, this.circle) ?? createEmptyLayout(snapshot, this.circle)
   }
 
   setSnapshot(snapshot: VisualizerLevelSnapshot) {
@@ -154,7 +158,7 @@ export class Voronoi {
       return
     }
 
-    const nextLayout = createLayout(snapshot, this.fullBoundary, this.circle, this.colors)
+    const nextLayout = createLayout(snapshot, this.fullBoundary, this.circle)
     if (nextLayout) {
       this.currentLayout = nextLayout
     }
@@ -190,7 +194,6 @@ function createLayout(
   snapshot: VisualizerLevelSnapshot,
   boundary: VoronoiPoint[],
   circle: CircleBounds,
-  colors: string[],
 ): VisualizerLayout | undefined {
   const clusterResult = clusterForVoronoi(createFileItems(snapshot.items))
   const renderCells = createCells(snapshot, boundary, clusterResult)
@@ -202,7 +205,7 @@ function createLayout(
     generation: snapshot.generation,
     path: snapshot.path,
     circle,
-    cells: renderCells.map((cell) => createLayoutCell(cell, colors)),
+    cells: renderCells.map(createLayoutCell),
   }
 }
 
@@ -294,9 +297,9 @@ function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[], item?: Fil
   }
 }
 
-function createLayoutCell(cell: RenderCell, colors: string[]): VisualizerLayoutCell {
+function createLayoutCell(cell: RenderCell): VisualizerLayoutCell {
   const source = cell.item?.source ?? cell.site.representative.source
-  const colorKey = cell.item && !cell.site.overflowReason ? cell.item.id : cell.site.id
+  const colorGroup = colorGroupForRenderCell(cell)
 
   return {
     id: cell.site.overflowReason || !cell.item ? cell.site.id : cell.item.id,
@@ -306,8 +309,8 @@ function createLayoutCell(cell: RenderCell, colors: string[]): VisualizerLayoutC
     size: cell.item?.weight ?? cell.site.weight,
     state: source.state,
     polygon: cell.polygon.map(([x, y]): VisualizerPoint => [x, y]),
-    colorKey,
-    fillColor: colorForKey(colorKey, colors),
+    colorGroup,
+    fillColor: fileColorForGroup(colorGroup),
   }
 }
 
@@ -814,14 +817,28 @@ function extensionType(item: VisualizerCellInput): string {
   }
 }
 
-function fileExtension(value: string) {
-  const name = value.split(/[\\/]/).filter(Boolean).at(-1) ?? value
-  const dotIndex = name.lastIndexOf(".")
-  if (dotIndex <= 0 || dotIndex === name.length - 1) {
-    return "extensionless"
+function colorGroupForRenderCell(cell: RenderCell): FileColorGroup {
+  if (cell.item && !cell.site.overflowReason) {
+    return colorGroupForItem(cell.item)
   }
 
-  return name.slice(dotIndex + 1).toLowerCase()
+  return colorGroupForSite(cell.site)
+}
+
+function colorGroupForSite(site: VoronoiSite): FileColorGroup {
+  const first = colorGroupForItem(site.representative)
+
+  for (const member of site.members) {
+    if (colorGroupForItem(member) !== first) {
+      return "file"
+    }
+  }
+
+  return first
+}
+
+function colorGroupForItem(item: FileItem): FileColorGroup {
+  return fileColorGroupForInput(item.source)
 }
 
 function createVoronoiDebugInput(snapshot: VisualizerLevelSnapshot, clusterResult: ClusterResult) {
@@ -883,17 +900,6 @@ function summarizeTreemapNode(node: TreemapNode) {
     polygonPoints: node.polygon?.length ?? 0,
     polygonSample: node.polygon?.slice(0, 3),
   }
-}
-
-function createPalette() {
-  return [
-    "hsl(196 42% 32% / 0.56)",
-    "hsl(156 28% 36% / 0.52)",
-    "hsl(34 40% 43% / 0.50)",
-    "hsl(0 0% 28% / 0.48)",
-    "hsl(84 24% 34% / 0.48)",
-    "hsl(12 35% 38% / 0.46)",
-  ]
 }
 
 function createCircleBounds(width: number, height: number): CircleBounds {
@@ -968,10 +974,6 @@ function drawPolygon(context: CanvasRenderingContext2D, polygon: VoronoiPoint[],
 function drawCirclePath(context: CanvasRenderingContext2D, circle: CircleBounds) {
   context.beginPath()
   context.arc(circle.centerX, circle.centerY, circle.radius, 0, Math.PI * 2)
-}
-
-function colorForKey(key: string, colors: string[]) {
-  return colors[hashString(key) % colors.length]
 }
 
 function hashLayout(snapshot: VisualizerLevelSnapshot, sites: VoronoiSite[]) {

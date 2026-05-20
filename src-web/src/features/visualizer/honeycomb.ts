@@ -18,8 +18,16 @@ export const HONEYCOMB_MAX_RESAMPLE_POINTS = 24
 export const HONEYCOMB_SMALL_RADIUS = 8
 export const HONEYCOMB_LARGE_RADIUS = 48
 export const HONEYCOMB_DEBUG_INSET = false
+export const LABEL_COLOR = "hsl(0 0% 100% / 0.86)"
+export const LABEL_FONT_SIZE_MIN = 9
+export const LABEL_FONT_SIZE_MAX = 13
+export const LABEL_VISIBILITY_THRESHOLD = 0.006
+export const LABEL_LENGTH_TRUNCATE = 28
 
 const SMOOTH_EPSILON = 0.000001
+const LABEL_AREA_RATIO = 0.82
+const LABEL_HEIGHT_RATIO = 0.78
+const LABEL_LINE_HEIGHT = 1.15
 
 type HoneycombOptions = {
   minCellArea?: number
@@ -51,7 +59,8 @@ function drawHoneycomb(
   options: ResolvedHoneycombOptions,
 ) {
   context.save()
-  layout.cells.forEach((cell) => drawHoneycombCell(context, cell, options))
+  const layoutCircleArea = Math.PI * layout.circle.radius ** 2
+  layout.cells.forEach((cell) => drawHoneycombCell(context, cell, options, layoutCircleArea))
   context.restore()
 }
 
@@ -59,6 +68,7 @@ function drawHoneycombCell(
   context: CanvasRenderingContext2D,
   cell: VisualizerLayoutCell,
   options: ResolvedHoneycombOptions,
+  layoutCircleArea: number,
 ) {
   const area = polygonAbsArea(cell.polygon)
   if (area <= 0) {
@@ -66,14 +76,14 @@ function drawHoneycombCell(
   }
 
   if (area < options.minCellArea) {
-    drawInscribedCircle(context, cell)
+    drawInscribedCircle(context, cell, undefined, layoutCircleArea)
     return
   }
 
   const style = resolveCellStyle(area, options)
   const inset = insetConvexPolygon(cell.polygon, style.separation)
   if (!inset || polygonAbsArea(inset) < options.minCellArea) {
-    drawInscribedCircle(context, cell)
+    drawInscribedCircle(context, cell, undefined, layoutCircleArea)
     return
   }
 
@@ -82,12 +92,14 @@ function drawHoneycombCell(
   }
 
   drawSmoothPolygon(context, inset, cell.fillColor, style.smooth, style.resampleSpacing)
+  drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea)
 }
 
 function drawInscribedCircle(
   context: CanvasRenderingContext2D,
   cell: VisualizerLayoutCell,
   circle = approximateInscribedCircle(cell.polygon),
+  layoutCircleArea = Infinity,
 ) {
   if (circle.radius <= 0.2) {
     return
@@ -102,6 +114,51 @@ function drawInscribedCircle(
   context.strokeStyle = "hsl(0 0% 100% / 0.28)"
   context.lineWidth = 1
   context.stroke()
+  context.restore()
+  drawCellLabel(context, cell, circle, layoutCircleArea)
+}
+
+function drawCellLabel(
+  context: CanvasRenderingContext2D,
+  cell: VisualizerLayoutCell,
+  circle: { center: VisualizerPoint; radius: number },
+  layoutCircleArea: number,
+) {
+  const circleArea = Math.PI * circle.radius ** 2
+  if (
+    circle.radius <= 0 ||
+    !Number.isFinite(layoutCircleArea) ||
+    circleArea / layoutCircleArea < LABEL_VISIBILITY_THRESHOLD
+  ) {
+    return
+  }
+
+  const fontSize = clamp(circle.radius * 0.32, LABEL_FONT_SIZE_MIN, LABEL_FONT_SIZE_MAX)
+  const lineHeight = fontSize * LABEL_LINE_HEIGHT
+  const totalHeight = lineHeight * 2
+  const availableHeight = circle.radius * 2 * LABEL_HEIGHT_RATIO
+  if (totalHeight > availableHeight) {
+    return
+  }
+
+  const name = truncateMiddle(cell.label, LABEL_LENGTH_TRUNCATE)
+  const size = formatBytes(cell.size)
+  const availableWidth = circle.radius * 2 * LABEL_AREA_RATIO
+  context.save()
+  context.font = `${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  const nameWidth = context.measureText(name).width
+  const sizeWidth = context.measureText(size).width
+  if (nameWidth > availableWidth || sizeWidth > availableWidth) {
+    context.restore()
+    return
+  }
+
+  context.fillStyle = LABEL_COLOR
+  context.globalAlpha = 1
+  context.textAlign = "center"
+  context.textBaseline = "middle"
+  context.fillText(name, circle.center[0], circle.center[1] - lineHeight / 2)
+  context.fillText(size, circle.center[0], circle.center[1] + lineHeight / 2)
   context.restore()
 }
 
@@ -362,6 +419,38 @@ function smoothStep(value: number) {
 
 function lerpNumber(from: number, to: number, amount: number) {
   return from + (to - from) * amount
+}
+
+function truncateMiddle(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  if (maxLength <= 3) {
+    return value.slice(0, Math.max(0, maxLength))
+  }
+
+  const available = maxLength - 3
+  const headLength = Math.ceil(available / 2)
+  const tailLength = Math.floor(available / 2)
+  return `${value.slice(0, headLength)}...${value.slice(value.length - tailLength)}`
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B"
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"]
+  let value = bytes
+  let unit = 0
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000
+    unit += 1
+  }
+
+  const maximumFractionDigits = unit === 0 ? 0 : 2
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value)} ${units[unit]}`
 }
 
 function clamp(value: number, min: number, max: number) {
