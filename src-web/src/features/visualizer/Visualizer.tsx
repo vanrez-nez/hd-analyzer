@@ -95,7 +95,7 @@ function drawVisualizer(
   if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
     canvas.width = backingWidth
     canvas.height = backingHeight
-    voronoiRef.current = new Voronoi(width, height, snapshot)
+    voronoiRef.current = new Voronoi(width, height, snapshot, colorScheme)
   }
 
   const context = canvas.getContext("2d")
@@ -104,8 +104,8 @@ function drawVisualizer(
   }
 
   context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
-  voronoiRef.current ??= new Voronoi(width, height, snapshot)
-  const layout = voronoiRef.current.getLayout(snapshot)
+  voronoiRef.current ??= new Voronoi(width, height, snapshot, colorScheme)
+  const layout = voronoiRef.current.getLayout(snapshot, colorScheme)
   voronoiRef.current.drawBackground(context)
   // voronoiRef.current.drawDebugBase(context, layout)
   honeycomb.draw(context, layout, { colorScheme })

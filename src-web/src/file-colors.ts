@@ -1,6 +1,12 @@
-import type { VisualizerCellInput } from "./types"
+import type { ColorScheme } from "@/lib/use-system-color-scheme"
 
 export type FileColorGroup = "file" | "folder" | "audio" | "video" | "document"
+
+type FileColorInput = {
+  kind: "volume" | "directory" | "file" | "other"
+  label: string
+  path: string
+}
 
 const AUDIO_EXTENSIONS = new Set([
   "aac",
@@ -53,12 +59,21 @@ const DOCUMENT_EXTENSIONS = new Set([
   "xlsx",
 ])
 
-const FILE_GROUP_COLORS: Record<FileColorGroup, string> = {
-  folder: "hsl(205 46% 42% / 0.58)",
-  audio: "hsl(150 36% 38% / 0.56)",
-  video: "hsl(8 48% 42% / 0.56)",
-  document: "hsl(38 48% 43% / 0.56)",
-  file: "hsl(220 10% 42% / 0.50)",
+export const FILE_GROUP_COLORS: Record<ColorScheme, Record<FileColorGroup, string>> = {
+  light: {
+    folder: "hsl(205 46% 42% / 0.58)",
+    audio: "hsl(150 36% 38% / 0.56)",
+    video: "hsl(8 48% 42% / 0.56)",
+    document: "hsl(38 48% 43% / 0.56)",
+    file: "hsl(220 10% 42% / 0.50)",
+  },
+  dark: {
+    folder: "hsl(205 62% 58% / 0.64)",
+    audio: "hsl(150 48% 52% / 0.62)",
+    video: "hsl(8 66% 60% / 0.62)",
+    document: "hsl(38 72% 58% / 0.62)",
+    file: "hsl(220 12% 66% / 0.54)",
+  },
 }
 
 export function fileExtension(value: string) {
@@ -71,7 +86,7 @@ export function fileExtension(value: string) {
   return name.slice(dotIndex + 1).toLowerCase()
 }
 
-export function fileColorGroupForInput(item: VisualizerCellInput): FileColorGroup {
+export function fileColorGroupForInput(item: FileColorInput): FileColorGroup {
   switch (item.kind) {
     case "volume":
     case "directory":
@@ -99,6 +114,6 @@ export function fileColorGroupForExtension(extension: string): FileColorGroup {
   return "file"
 }
 
-export function fileColorForGroup(group: FileColorGroup) {
-  return FILE_GROUP_COLORS[group]
+export function fileColorForGroup(group: FileColorGroup, colorScheme: ColorScheme) {
+  return FILE_GROUP_COLORS[colorScheme][group]
 }

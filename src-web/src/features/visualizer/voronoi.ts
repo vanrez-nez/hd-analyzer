@@ -4,8 +4,9 @@ import {
   fileColorForGroup,
   fileColorGroupForInput,
   fileExtension,
-} from "./file-colors"
-import type { FileColorGroup } from "./file-colors"
+} from "@/file-colors"
+import type { FileColorGroup } from "@/file-colors"
+import type { ColorScheme } from "@/lib/use-system-color-scheme"
 import type { VisualizerCellInput, VisualizerLevelSnapshot } from "./types"
 
 type PartitionType = "size" | "type"
@@ -77,6 +78,7 @@ export type VisualizerLayoutCell = {
 export type VisualizerLayout = {
   generation: string
   path: string | null
+  colorScheme: ColorScheme
   circle: VisualizerCircle
   cells: VisualizerLayoutCell[]
 }
@@ -144,28 +146,33 @@ export class Voronoi {
   private readonly height: number
   private readonly width: number
 
-  constructor(width: number, height: number, snapshot: VisualizerLevelSnapshot) {
+  constructor(width: number, height: number, snapshot: VisualizerLevelSnapshot, colorScheme: ColorScheme) {
     this.width = Math.max(1, width)
     this.height = Math.max(1, height)
     this.circle = createCircleBounds(this.width, this.height)
     this.fullBoundary = createCircleBoundary(this.circle)
     this.currentLayout =
-      createLayout(snapshot, this.fullBoundary, this.circle) ?? createEmptyLayout(snapshot, this.circle)
+      createLayout(snapshot, this.fullBoundary, this.circle, colorScheme) ??
+      createEmptyLayout(snapshot, this.circle, colorScheme)
   }
 
-  setSnapshot(snapshot: VisualizerLevelSnapshot) {
-    if (snapshot.path === this.currentLayout.path && snapshot.generation === this.currentLayout.generation) {
+  setSnapshot(snapshot: VisualizerLevelSnapshot, colorScheme: ColorScheme) {
+    if (
+      snapshot.path === this.currentLayout.path &&
+      snapshot.generation === this.currentLayout.generation &&
+      colorScheme === this.currentLayout.colorScheme
+    ) {
       return
     }
 
-    const nextLayout = createLayout(snapshot, this.fullBoundary, this.circle)
+    const nextLayout = createLayout(snapshot, this.fullBoundary, this.circle, colorScheme)
     if (nextLayout) {
       this.currentLayout = nextLayout
     }
   }
 
-  getLayout(snapshot: VisualizerLevelSnapshot) {
-    this.setSnapshot(snapshot)
+  getLayout(snapshot: VisualizerLevelSnapshot, colorScheme: ColorScheme) {
+    this.setSnapshot(snapshot, colorScheme)
     return this.currentLayout
   }
 
@@ -194,6 +201,7 @@ function createLayout(
   snapshot: VisualizerLevelSnapshot,
   boundary: VoronoiPoint[],
   circle: CircleBounds,
+  colorScheme: ColorScheme,
 ): VisualizerLayout | undefined {
   const clusterResult = clusterForVoronoi(createFileItems(snapshot.items))
   const renderCells = createCells(snapshot, boundary, clusterResult)
@@ -204,15 +212,21 @@ function createLayout(
   return {
     generation: snapshot.generation,
     path: snapshot.path,
+    colorScheme,
     circle,
-    cells: renderCells.map(createLayoutCell),
+    cells: renderCells.map((cell) => createLayoutCell(cell, colorScheme)),
   }
 }
 
-function createEmptyLayout(snapshot: VisualizerLevelSnapshot, circle: CircleBounds): VisualizerLayout {
+function createEmptyLayout(
+  snapshot: VisualizerLevelSnapshot,
+  circle: CircleBounds,
+  colorScheme: ColorScheme,
+): VisualizerLayout {
   return {
     generation: snapshot.generation,
     path: snapshot.path,
+    colorScheme,
     circle,
     cells: [],
   }
@@ -297,7 +311,7 @@ function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[], item?: Fil
   }
 }
 
-function createLayoutCell(cell: RenderCell): VisualizerLayoutCell {
+function createLayoutCell(cell: RenderCell, colorScheme: ColorScheme): VisualizerLayoutCell {
   const source = cell.item?.source ?? cell.site.representative.source
   const colorGroup = colorGroupForRenderCell(cell)
 
@@ -310,7 +324,7 @@ function createLayoutCell(cell: RenderCell): VisualizerLayoutCell {
     state: source.state,
     polygon: cell.polygon.map(([x, y]): VisualizerPoint => [x, y]),
     colorGroup,
-    fillColor: fileColorForGroup(colorGroup),
+    fillColor: fileColorForGroup(colorGroup, colorScheme),
   }
 }
 
