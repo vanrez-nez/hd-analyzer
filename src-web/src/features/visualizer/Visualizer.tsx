@@ -19,6 +19,7 @@ type VisualizerProps = {
 
 const honeycomb = new Honeycomb()
 const VISUALIZER_RESIZE_DEBOUNCE_MS = 100
+const SELECTION_HIGHLIGHT_FADE_MS = 140
 
 export function Visualizer({
   colorScheme,
@@ -33,27 +34,64 @@ export function Visualizer({
   const snapshotRef = useRef(snapshot)
   const colorSchemeRef = useRef(colorScheme)
   const selectedItemIdsRef = useRef(selectedItemIds)
+  const selectionFadeFrameRef = useRef<number | undefined>(undefined)
+  const selectionFadeStartByIdRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
+    const previousSelectedItemIds = new Set(selectedItemIdsRef.current)
+    const nextSelectedItemIds = new Set(selectedItemIds)
+    const now = performance.now()
+
+    selectionFadeStartByIdRef.current.forEach((_startedAt, itemId) => {
+      if (!nextSelectedItemIds.has(itemId)) {
+        selectionFadeStartByIdRef.current.delete(itemId)
+      }
+    })
+
+    selectedItemIds.forEach((itemId) => {
+      if (!previousSelectedItemIds.has(itemId)) {
+        selectionFadeStartByIdRef.current.set(itemId, now)
+      }
+    })
+
     snapshotRef.current = snapshot
     colorSchemeRef.current = colorScheme
     selectedItemIdsRef.current = selectedItemIds
-    drawVisualizer(canvasRef.current, wrapperRef.current, voronoiRef, snapshot, colorScheme, selectedItemIds)
+    drawCurrentVisualizerFrame(now)
+    scheduleSelectionFade()
   }, [colorScheme, selectedItemIds, snapshot])
+
+  const drawCurrentVisualizerFrame = (frameTime = performance.now()) => {
+    drawVisualizer(
+      canvasRef.current,
+      wrapperRef.current,
+      voronoiRef,
+      snapshotRef.current,
+      colorSchemeRef.current,
+      selectedItemIdsRef.current,
+      selectionProgressById(selectedItemIdsRef.current, selectionFadeStartByIdRef.current, frameTime),
+    )
+  }
+
+  const scheduleSelectionFade = () => {
+    if (selectionFadeFrameRef.current !== undefined || selectionFadeStartByIdRef.current.size === 0) {
+      return
+    }
+
+    selectionFadeFrameRef.current = window.requestAnimationFrame((frameTime) => {
+      selectionFadeFrameRef.current = undefined
+      drawCurrentVisualizerFrame(frameTime)
+      scheduleSelectionFade()
+    })
+  }
 
   useEffect(() => {
     let resizeTimeout: number | undefined
     const scheduleRedraw = () => {
       window.clearTimeout(resizeTimeout)
       resizeTimeout = window.setTimeout(() => {
-        drawVisualizer(
-          canvasRef.current,
-          wrapperRef.current,
-          voronoiRef,
-          snapshotRef.current,
-          colorSchemeRef.current,
-          selectedItemIdsRef.current,
-        )
+        drawCurrentVisualizerFrame()
+        scheduleSelectionFade()
       }, VISUALIZER_RESIZE_DEBOUNCE_MS)
     }
 
@@ -66,6 +104,8 @@ export function Visualizer({
     window.addEventListener("resize", scheduleRedraw)
     return () => {
       window.clearTimeout(resizeTimeout)
+      window.cancelAnimationFrame(selectionFadeFrameRef.current ?? 0)
+      selectionFadeFrameRef.current = undefined
       resizeObserver?.disconnect()
       window.removeEventListener("resize", scheduleRedraw)
     }
@@ -111,6 +151,7 @@ function drawVisualizer(
   snapshot: VisualizerLevelSnapshot,
   colorScheme: ColorScheme,
   selectedItemIds: string[],
+  selectionProgressById?: ReadonlyMap<string, number>,
 ) {
   const renderState = prepareVisualizer(canvas, wrapper, voronoiRef, snapshot, colorScheme)
   if (!renderState) {
@@ -121,7 +162,7 @@ function drawVisualizer(
   context.setTransform(scaleX, 0, 0, scaleY, 0, 0)
   voronoi.drawBackground(context)
   // voronoi.drawDebugBase(context, layout)
-  honeycomb.draw(context, layout, { colorScheme, selectedItemIds })
+  honeycomb.draw(context, layout, { colorScheme, selectedItemIds, selectionProgressById })
   voronoi.drawFrame(context, layout)
   return false
 }
@@ -205,6 +246,44 @@ function selectionForCellClick(
   }
 
   return replaceSelection(memberIds)
+}
+
+function selectionProgressById(
+  selectedItemIds: readonly string[],
+  fadeStartById: Map<string, number>,
+  frameTime: number,
+) {
+  const selectedItemIdSet = new Set(selectedItemIds)
+  const progressById = new Map<string, number>()
+
+  fadeStartById.forEach((startedAt, itemId) => {
+    if (!selectedItemIdSet.has(itemId)) {
+      fadeStartById.delete(itemId)
+      return
+    }
+
+    const progress = clamp((frameTime - startedAt) / SELECTION_HIGHLIGHT_FADE_MS, 0, 1)
+    if (progress >= 1) {
+      fadeStartById.delete(itemId)
+      return
+    }
+
+    progressById.set(itemId, easeOutCubic(progress))
+  })
+
+  return progressById
+}
+
+function easeOutCubic(value: number) {
+  return 1 - (1 - value) ** 3
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return min
+  }
+
+  return Math.min(max, Math.max(min, value))
 }
 
 function getCanvasContentMetrics(canvas: HTMLCanvasElement, wrapper: HTMLDivElement) {

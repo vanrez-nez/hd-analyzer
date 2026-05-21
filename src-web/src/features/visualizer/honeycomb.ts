@@ -40,6 +40,7 @@ type HoneycombOptions = {
   colorScheme?: ColorScheme
   minCellArea?: number
   selectedItemIds?: readonly string[]
+  selectionProgressById?: ReadonlyMap<string, number>
   separation?: number
   smooth?: number
 }
@@ -50,6 +51,7 @@ type ResolvedHoneycombOptions = {
   maxSeparation: number
   maxSmooth: number
   selectedItemIds: Set<string>
+  selectionProgressById: ReadonlyMap<string, number>
 }
 
 type HoneycombCellStyle = {
@@ -114,17 +116,17 @@ function drawHoneycombCell(
     return
   }
 
-  const selected = isSelectedCell(cell, options.selectedItemIds)
+  const selectionProgress = selectedCellProgress(cell, options)
 
   if (area < options.minCellArea) {
-    drawInscribedCircle(context, cell, options, selected, undefined, layoutCircleArea)
+    drawInscribedCircle(context, cell, options, selectionProgress, undefined, layoutCircleArea)
     return
   }
 
   const style = resolveCellStyle(area, options)
   const inset = insetConvexPolygon(cell.polygon, style.separation)
   if (!inset || polygonAbsArea(inset) < options.minCellArea) {
-    drawInscribedCircle(context, cell, options, selected, undefined, layoutCircleArea)
+    drawInscribedCircle(context, cell, options, selectionProgress, undefined, layoutCircleArea)
     return
   }
 
@@ -132,16 +134,7 @@ function drawHoneycombCell(
     drawInsetDebug(context, cell.polygon, inset, style.separation)
   }
 
-  const cellStyle = resolveCellDrawStyle(cell, options, selected)
-  drawSmoothPolygon(
-    context,
-    inset,
-    cellStyle.fill,
-    cellStyle.stroke,
-    style.smooth,
-    style.resampleSpacing,
-    cellStyle.lineWidth,
-  )
+  drawSmoothCell(context, cell, options, inset, style, selectionProgress)
   drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea)
 }
 
@@ -201,11 +194,57 @@ function resolveCellDrawStyle(
   }
 }
 
+function drawSmoothCell(
+  context: CanvasRenderingContext2D,
+  cell: VisualizerLayoutCell,
+  options: ResolvedHoneycombOptions,
+  inset: VisualizerPoint[],
+  style: HoneycombCellStyle,
+  selectionProgress: number | undefined,
+) {
+  if (selectionProgress === undefined || selectionProgress >= 1) {
+    const cellStyle = resolveCellDrawStyle(cell, options, selectionProgress !== undefined)
+    drawSmoothPolygon(
+      context,
+      inset,
+      cellStyle.fill,
+      cellStyle.stroke,
+      style.smooth,
+      style.resampleSpacing,
+      cellStyle.lineWidth,
+    )
+    return
+  }
+
+  const baseStyle = resolveCellDrawStyle(cell, options, false)
+  drawSmoothPolygon(
+    context,
+    inset,
+    baseStyle.fill,
+    baseStyle.stroke,
+    style.smooth,
+    style.resampleSpacing,
+    baseStyle.lineWidth,
+  )
+
+  const selectedStyle = resolveCellDrawStyle(cell, options, true)
+  drawSmoothPolygon(
+    context,
+    inset,
+    selectedStyle.fill,
+    selectedStyle.stroke,
+    style.smooth,
+    style.resampleSpacing,
+    selectedStyle.lineWidth,
+    0.92 * selectionProgress,
+  )
+}
+
 function drawInscribedCircle(
   context: CanvasRenderingContext2D,
   cell: VisualizerLayoutCell,
   options: ResolvedHoneycombOptions,
-  selected: boolean,
+  selectionProgress: number | undefined,
   circle = approximateInscribedCircle(cell.polygon),
   layoutCircleArea = Infinity,
 ) {
@@ -213,18 +252,34 @@ function drawInscribedCircle(
     return
   }
 
-  const cellStyle = resolveCellDrawStyle(cell, options, selected)
+  if (selectionProgress === undefined || selectionProgress >= 1) {
+    const cellStyle = resolveCellDrawStyle(cell, options, selectionProgress !== undefined)
+    drawCircleShape(context, circle, cellStyle, 0.92)
+    drawCellLabel(context, cell, circle, layoutCircleArea)
+    return
+  }
+
+  drawCircleShape(context, circle, resolveCellDrawStyle(cell, options, false), 0.92)
+  drawCircleShape(context, circle, resolveCellDrawStyle(cell, options, true), 0.92 * selectionProgress)
+  drawCellLabel(context, cell, circle, layoutCircleArea)
+}
+
+function drawCircleShape(
+  context: CanvasRenderingContext2D,
+  circle: { center: VisualizerPoint; radius: number },
+  cellStyle: { fill: string; lineWidth: number; stroke: string },
+  alpha: number,
+) {
   context.save()
   context.beginPath()
   context.arc(circle.center[0], circle.center[1], circle.radius, 0, Math.PI * 2)
   context.fillStyle = cellStyle.fill
-  context.globalAlpha = 0.92
+  context.globalAlpha = alpha
   context.fill()
   context.strokeStyle = cellStyle.stroke
   context.lineWidth = cellStyle.lineWidth
   context.stroke()
   context.restore()
-  drawCellLabel(context, cell, circle, layoutCircleArea)
 }
 
 function drawCellLabel(
@@ -279,6 +334,7 @@ function drawSmoothPolygon(
   smooth: number,
   resampleSpacing: number,
   lineWidth: number,
+  alpha = 0.92,
 ) {
   const points = cleanDrawPolygon(polygon)
   if (points.length < 3) {
@@ -286,7 +342,7 @@ function drawSmoothPolygon(
   }
 
   if (smooth <= 0.01) {
-    drawLinearPolygon(context, points, fillStyle, strokeStyle, lineWidth)
+    drawLinearPolygon(context, points, fillStyle, strokeStyle, lineWidth, alpha)
     return
   }
 
@@ -325,7 +381,7 @@ function drawSmoothPolygon(
   context.quadraticCurveTo(resampled[0][0], resampled[0][1], firstCorner.outgoing[0], firstCorner.outgoing[1])
   context.closePath()
   context.fillStyle = fillStyle
-  context.globalAlpha = 0.92
+  context.globalAlpha = alpha
   context.fill()
   context.strokeStyle = strokeStyle
   context.lineWidth = lineWidth
@@ -339,6 +395,7 @@ function drawLinearPolygon(
   fillStyle: string,
   strokeStyle: string,
   lineWidth: number,
+  alpha = 0.92,
 ) {
   const points = cleanDrawPolygon(polygon)
   if (points.length < 3) {
@@ -357,7 +414,7 @@ function drawLinearPolygon(
   })
   context.closePath()
   context.fillStyle = fillStyle
-  context.globalAlpha = 0.92
+  context.globalAlpha = alpha
   context.fill()
   context.strokeStyle = strokeStyle
   context.lineWidth = lineWidth
@@ -541,6 +598,7 @@ function resolveOptions(options: HoneycombOptions): ResolvedHoneycombOptions {
     maxSeparation,
     maxSmooth: clamp(options.smooth ?? HONEYCOMB_MAX_SMOOTH, 0, 1),
     selectedItemIds: new Set(options.selectedItemIds ?? []),
+    selectionProgressById: options.selectionProgressById ?? new Map<string, number>(),
   }
 }
 
@@ -601,16 +659,28 @@ function formatBytes(bytes: number) {
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits }).format(value)} ${units[unit]}`
 }
 
-function isSelectedCell(cell: VisualizerLayoutCell, selectedItemIds: Set<string>) {
-  if (selectedItemIds.size === 0) {
-    return false
+function selectedCellProgress(cell: VisualizerLayoutCell, options: ResolvedHoneycombOptions) {
+  if (options.selectedItemIds.size === 0) {
+    return undefined
   }
 
-  return (
-    selectedItemIds.has(cell.id) ||
-    selectedItemIds.has(cell.selectionId) ||
-    cell.memberIds.some((memberId) => selectedItemIds.has(memberId))
-  )
+  let selected = false
+  let progress = 0
+
+  for (const itemId of selectedCellCandidateIds(cell)) {
+    if (!options.selectedItemIds.has(itemId)) {
+      continue
+    }
+
+    selected = true
+    progress = Math.max(progress, options.selectionProgressById.get(itemId) ?? 1)
+  }
+
+  return selected ? clamp(progress, 0, 1) : undefined
+}
+
+function selectedCellCandidateIds(cell: VisualizerLayoutCell) {
+  return [cell.id, cell.selectionId, ...cell.memberIds]
 }
 
 function borderColorForCell(fillStyle: string, colorScheme: ColorScheme) {
