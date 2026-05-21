@@ -97,6 +97,9 @@ export function Visualizer({
         }}
       />
       <LegendVisualizer colorScheme={colorScheme} items={snapshot.items} />
+      <div className="pointer-events-none absolute bottom-3 right-3 select-none font-mono text-[0.6875rem] text-muted-foreground/55">
+        v{__APP_VERSION__}
+      </div>
     </div>
   )
 }
