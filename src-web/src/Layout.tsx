@@ -22,6 +22,7 @@ const DEFAULT_SPLIT_LAYOUT: SplitLayout = {
   visualizer: 70,
 }
 const SPLIT_ANIMATION_MS = 180
+const VISUALIZER_TOP_OFFSET_CLASS = "pt-11"
 
 type LayoutProps = {
   colorScheme: ColorScheme
@@ -175,13 +176,17 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
         panelRef={visualizerPanelRef}
         className="min-h-0 min-w-0 overflow-hidden"
       >
-        <Visualizer
-          colorScheme={colorScheme}
-          selectedItemIds={selectedItemIds}
-          snapshot={visualizerSnapshot}
-          onExplorerSelectionAnchorChange={setExplorerSelectionAnchorId}
-          onSelectionChange={setSelectedItemIds}
-        />
+        <div className={cn("flex h-full min-h-0 flex-col", VISUALIZER_TOP_OFFSET_CLASS)}>
+          <div className="min-h-0 flex-1">
+            <Visualizer
+              colorScheme={colorScheme}
+              selectedItemIds={selectedItemIds}
+              snapshot={visualizerSnapshot}
+              onExplorerSelectionAnchorChange={setExplorerSelectionAnchorId}
+              onSelectionChange={setSelectedItemIds}
+            />
+          </div>
+        </div>
       </ResizablePanel>
     </ResizablePanelGroup>
   )
