@@ -458,7 +458,7 @@ function progressEventKey(jobId: string, requestId: string) {
 function volumeToVisualizerItem(volume: DriveDto): VisualizerCellInput {
   return {
     id: volume.id,
-    label: volume.label,
+    label: volumeNameOnly(volume.label, volume.mountPoint),
     path: volume.mountPoint,
     kind: "volume",
     size: Math.max(0, volume.usedSpace),
@@ -502,6 +502,29 @@ function getVisualizerParentPath(path: string, rootPath: string) {
 function normalizePath(path: string) {
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "")
   return normalized || "/"
+}
+
+function volumeNameOnly(label: string, rootPath: string) {
+  const trimmed = label.trim()
+  const normalizedRoot = normalizePath(rootPath)
+  const suffixMatch = trimmed.match(/^(.*?)\s+\((.*)\)$/)
+  if (suffixMatch?.[2] && normalizePath(suffixMatch[2]) === normalizedRoot) {
+    return suffixMatch[1].trim() || lastPathPart(normalizedRoot)
+  }
+
+  if (normalizePath(trimmed) === normalizedRoot || trimmed.startsWith("/")) {
+    return lastPathPart(normalizedRoot)
+  }
+
+  return trimmed || lastPathPart(normalizedRoot)
+}
+
+function lastPathPart(path: string) {
+  if (path === "/") {
+    return "/"
+  }
+
+  return path.split("/").filter(Boolean).at(-1) ?? path
 }
 
 function isInsideRoot(path: string, rootPath: string) {

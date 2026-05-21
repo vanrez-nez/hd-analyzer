@@ -18,6 +18,9 @@ pub struct DriveDto {
     pub available_space: u64,
     pub used_space: u64,
     pub file_system: String,
+    pub storage_kind: String,
+    pub is_removable: bool,
+    pub is_read_only: bool,
 }
 
 impl From<&Volume> for DriveDto {
@@ -30,6 +33,9 @@ impl From<&Volume> for DriveDto {
             available_space: volume.available_bytes,
             used_space: volume.total_bytes.saturating_sub(volume.available_bytes),
             file_system: volume.filesystem.clone(),
+            storage_kind: volume.storage_kind.clone(),
+            is_removable: volume.is_removable,
+            is_read_only: volume.is_read_only,
         }
     }
 }
@@ -484,7 +490,9 @@ mod tests {
             total_bytes: 100,
             available_bytes: 40,
             filesystem: "apfs".to_string(),
+            storage_kind: "SSD".to_string(),
             is_removable: false,
+            is_read_only: true,
             is_accessible: true,
             access_issue: None,
         };
@@ -493,6 +501,8 @@ mod tests {
 
         assert_eq!(dto.id, "/data");
         assert_eq!(dto.used_space, 60);
+        assert_eq!(dto.storage_kind, "SSD");
+        assert!(dto.is_read_only);
     }
 
     #[test]

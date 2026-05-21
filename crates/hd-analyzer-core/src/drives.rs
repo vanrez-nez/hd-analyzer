@@ -11,6 +11,9 @@ pub struct Drive {
     pub total_space: u64,
     pub available_space: u64,
     pub file_system: String,
+    pub storage_kind: String,
+    pub is_removable: bool,
+    pub is_read_only: bool,
 }
 
 impl Drive {
@@ -34,7 +37,7 @@ pub fn list_drives() -> Result<Vec<Drive>> {
         let label = if disk_name.is_empty() {
             mount_point.display().to_string()
         } else {
-            format!("{disk_name} ({})", mount_point.display())
+            disk_name.into_owned()
         };
 
         seen.entry(mount_point.clone()).or_insert(Drive {
@@ -43,6 +46,9 @@ pub fn list_drives() -> Result<Vec<Drive>> {
             total_space: disk.total_space(),
             available_space: disk.available_space(),
             file_system,
+            storage_kind: disk.kind().to_string(),
+            is_removable: disk.is_removable(),
+            is_read_only: disk.is_read_only(),
         });
     }
 
@@ -86,6 +92,9 @@ mod tests {
             total_space: 10,
             available_space: 20,
             file_system: "testfs".to_string(),
+            storage_kind: "SSD".to_string(),
+            is_removable: false,
+            is_read_only: false,
         };
 
         assert_eq!(drive.used_space(), 0);

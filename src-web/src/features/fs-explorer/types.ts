@@ -17,6 +17,9 @@ export type DriveDto = {
   availableSpace: number
   usedSpace: number
   fileSystem: string
+  storageKind: string
+  isRemovable: boolean
+  isReadOnly: boolean
 }
 
 export type ScanConfigDto = {

@@ -7,6 +7,7 @@ import {
   Folder,
   FolderOpenIcon,
   HardDrive,
+  LockIcon,
   SquareTerminalIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -22,6 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
@@ -56,6 +58,7 @@ type StatusItem = {
   size: number
   totalSpace?: number
   availableSpace?: number
+  isReadOnly?: boolean
 }
 type ExplorerBusyOverlay = ExplorerLoadingOverlayProps
 type ExplorerRow = DriveDto | PathNodeDto
@@ -330,8 +333,8 @@ function NameCell({ row }: { row: ExplorerRow }) {
     return (
       <span className="flex min-w-0 items-center gap-2 overflow-hidden">
         <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
-        <span className="truncate" title={row.label}>
-          {row.label}
+        <span className="truncate" title={volumeDisplayName(row)}>
+          {volumeDisplayName(row)}
         </span>
       </span>
     )
@@ -379,15 +382,21 @@ function ExplorerStatusBar({
             <span className="min-w-0 truncate font-medium" title={selected.label}>
               {selected.label}
             </span>
-            <span className="flex min-w-0 items-center justify-end gap-3 text-muted-foreground">
-              <span className="whitespace-nowrap">Total {formatBytes(selected.totalSpace ?? 0)}</span>
-              <span className="whitespace-nowrap">Free {formatBytes(selected.availableSpace ?? 0)}</span>
-              <span className="max-w-24 truncate" title={selected.fileSystem}>
+            <span className="flex min-w-0 items-center justify-end gap-1.5">
+              <Badge className="shrink-0 whitespace-nowrap">Total {formatBytes(selected.totalSpace ?? 0)}</Badge>
+              <Badge className="shrink-0 whitespace-nowrap">Free {formatBytes(selected.availableSpace ?? 0)}</Badge>
+              <Badge className="max-w-28 shrink-0 truncate" title={selected.fileSystem || "Unknown FS"}>
                 {selected.fileSystem || "Unknown FS"}
-              </span>
-              <span className="max-w-64 truncate" title={selected.mountPoint}>
+              </Badge>
+              <Badge className="max-w-48 shrink truncate" title={selected.mountPoint}>
                 {selected.mountPoint}
-              </span>
+              </Badge>
+              {selected.isReadOnly ? (
+                <Badge className="shrink-0 whitespace-nowrap">
+                  <LockIcon className="mr-1 size-3" aria-hidden="true" />
+                  Read-only
+                </Badge>
+              ) : null}
             </span>
           </>
         ) : (
@@ -566,12 +575,13 @@ function rowToStatusItem(row: ExplorerRow, liveUpdates?: Record<string, Director
 function volumeToStatusItem(volume: DriveDto): StatusItem {
   return {
     id: volume.id,
-    label: volume.label,
+    label: volumeDisplayName(volume),
     kind: "volume",
     size: volume.usedSpace,
     totalSpace: volume.totalSpace,
     availableSpace: volume.availableSpace,
     fileSystem: volume.fileSystem,
+    isReadOnly: volume.isReadOnly,
     mountPoint: volume.mountPoint,
     path: volume.mountPoint,
   }
@@ -817,8 +827,48 @@ function volumeSortValue(volume: DriveDto, column: SortColumn) {
     case "size":
       return { complete: true, value: volume.usedSpace }
     case "name":
-      return volume.label
+      return volumeDisplayName(volume)
   }
+}
+
+function volumeDisplayName(volume: DriveDto) {
+  const name = volumeNameOnly(volume.label, volume.mountPoint)
+  const location = volume.isRemovable ? "External" : "Internal"
+  const kind = normalizeStorageKind(volume.storageKind)
+  return kind ? `${name} (${location} ${kind})` : `${name} (${location})`
+}
+
+function normalizeStorageKind(kind: string) {
+  const normalized = kind.trim()
+  return normalized && normalized.toLowerCase() !== "unknown" ? normalized : undefined
+}
+
+function volumeNameOnly(label: string, rootPath: string) {
+  const trimmed = label.trim()
+  const normalizedRoot = normalizePath(rootPath)
+  const suffixMatch = trimmed.match(/^(.*?)\s+\((.*)\)$/)
+  if (suffixMatch?.[2] && normalizePath(suffixMatch[2]) === normalizedRoot) {
+    return suffixMatch[1].trim() || lastPathPart(normalizedRoot)
+  }
+
+  if (normalizePath(trimmed) === normalizedRoot || trimmed.startsWith("/")) {
+    return lastPathPart(normalizedRoot)
+  }
+
+  return trimmed || lastPathPart(normalizedRoot)
+}
+
+function normalizePath(path: string) {
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "")
+  return normalized || "/"
+}
+
+function lastPathPart(path: string) {
+  if (path === "/") {
+    return "/"
+  }
+
+  return path.split("/").filter(Boolean).at(-1) ?? path
 }
 
 function nodeSortValue(node: PathNodeDto, column: SortColumn) {
