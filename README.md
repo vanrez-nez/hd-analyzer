@@ -10,7 +10,7 @@ HD Analyzer gives you a desktop view into storage usage. It uses a Rust scanner 
 
 ## Key Features
 
-- **Parallel scanning**: Uses `rayon` to traverse filesystems using available CPU cores.
+- **Filesystem explorer**: Uses a Rust scanner backend with lazy directory discovery, cached listings, and streamed progress.
 - **Desktop UI**: Tauri v2 shell with a React + shadcn/ui frontend.
 - **Scan progress**: Tracks active scans and updates the explorer as results become available.
 - **Permission handling**: Checks macOS Full Disk Access state and exposes the app permission request from the desktop UI.
@@ -54,4 +54,4 @@ npm --prefix src-web run build
 - [Tauri](https://tauri.app/)
 - [React](https://react.dev/)
 - [shadcn/ui](https://ui.shadcn.com/)
-- [Rayon](https://github.com/rayon-rs/rayon)
+- [jwalk](https://github.com/Byron/jwalk)

@@ -10,7 +10,6 @@ humansize.workspace = true
 jwalk.workspace = true
 log.workspace = true
 nix.workspace = true
-rayon.workspace = true
 serde.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true

@@ -12,7 +12,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 hd-analyzer-core = { path = "../crates/hd-analyzer-core" }
 log = "0.4.29"
 serde.workspace = true
