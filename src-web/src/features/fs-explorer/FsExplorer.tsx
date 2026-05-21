@@ -61,6 +61,7 @@ export function FsExplorer({
   const [currentPath, setCurrentPath] = useState<string>()
   const [cache, setCache] = useState<ExplorerCache>(() => createExplorerCache())
   const [loadingPath, setLoadingPath] = useState<string>()
+  const [isReloadingVolumes, setIsReloadingVolumes] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>()
   const [scanProgress, setScanProgress] = useState<ScanProgressState>()
   const [liveUpdates, setLiveUpdates] = useState<LiveDirectoryUpdates>({})
@@ -79,6 +80,7 @@ export function FsExplorer({
   const isNavigationPending = Boolean(pendingNavigation)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
   const isVolumesLevel = !currentPath
+  const reloadDisabled = isVolumesLevel ? isReloadingVolumes : isReloadingCurrentPath || isNavigationPending
   const busyOverlay = useMemo(
     () =>
       pendingNavigation
@@ -360,6 +362,18 @@ export function FsExplorer({
     }
   }, [currentPath, selectedVolume, startScan])
 
+  const reloadVolumes = useCallback(async () => {
+    setError(undefined)
+    setIsReloadingVolumes(true)
+    try {
+      await refreshVolumes()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsReloadingVolumes(false)
+    }
+  }, [refreshVolumes])
+
   const returnToVolumes = () => {
     navigationRequestRef.current += 1
     setSelectedVolume(undefined)
@@ -394,14 +408,14 @@ export function FsExplorer({
           />
         </div>
         <ButtonGroup>
-          {canReloadCurrentPath ? (
+          {isVolumesLevel || canReloadCurrentPath ? (
             <Button
               type="button"
               variant="outline"
               size="icon-sm"
-              aria-label="Reload current path"
-              disabled={isReloadingCurrentPath || isNavigationPending}
-              onClick={() => void reloadCurrentPath()}
+              aria-label={isVolumesLevel ? "Reload volumes" : "Reload current path"}
+              disabled={reloadDisabled}
+              onClick={() => void (isVolumesLevel ? reloadVolumes() : reloadCurrentPath())}
             >
               <RefreshCwIcon data-icon="inline-start" />
             </Button>
