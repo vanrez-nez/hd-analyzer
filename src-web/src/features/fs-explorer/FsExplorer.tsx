@@ -92,11 +92,21 @@ export function FsExplorer({
     [pendingNavigation, scanProgress],
   )
 
-  useEffect(() => {
-    fsListVolumes()
-      .then(setVolumes)
-      .catch((error: unknown) => setError(error instanceof Error ? error.message : String(error)))
+  const refreshVolumes = useCallback(async () => {
+    const nextVolumes = await fsListVolumes()
+    setVolumes(nextVolumes)
+    setSelectedVolume((current) => {
+      if (!current) {
+        return current
+      }
+
+      return nextVolumes.find((volume) => isSameVolume(volume, current)) ?? current
+    })
   }, [])
+
+  useEffect(() => {
+    refreshVolumes().catch((error: unknown) => setError(error instanceof Error ? error.message : String(error)))
+  }, [currentPath, refreshVolumes])
 
   useEffect(() => {
     if (!onVisualizerSnapshotChange) {
@@ -307,12 +317,15 @@ export function FsExplorer({
         onSelectionChange([])
         onExplorerSelectionAnchorChange(null)
         await openPath(currentPath, selectedVolume, true)
+        await refreshVolumes().catch((error: unknown) => {
+          setError(error instanceof Error ? error.message : String(error))
+        })
       } catch (error) {
         setError(error instanceof Error ? error.message : String(error))
         throw error
       }
     },
-    [currentPath, onExplorerSelectionAnchorChange, onSelectionChange, openPath, selectedVolume],
+    [currentPath, onExplorerSelectionAnchorChange, onSelectionChange, openPath, refreshVolumes, selectedVolume],
   )
 
   const openVolume = (volume: DriveDto) => {
@@ -428,6 +441,10 @@ export function FsExplorer({
 
 function listingNeedsScan(listing: DirectoryListingDto) {
   return listing.children.some((node) => node.kind === "directory" && node.state !== "complete")
+}
+
+function isSameVolume(left: DriveDto, right: DriveDto) {
+  return left.mountPoint === right.mountPoint || left.id === right.id
 }
 
 function scanKey(path: string) {
