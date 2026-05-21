@@ -1629,6 +1629,7 @@ dependencies = [
  "log",
  "nix",
  "objc2-foundation",
+ "rayon",
  "serde",
  "sysinfo",
  "tempfile",

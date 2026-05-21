@@ -188,11 +188,24 @@ pub struct DirectorySizeSummary {
     pub issues: Vec<ScanIssue>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreciseScanProfile {
+    pub entries_collected: u64,
+    pub read_dir_nanos: u64,
+    pub file_type_nanos: u64,
+    pub metadata_nanos: u64,
+    pub size_nanos: u64,
+    pub live_update_nanos: u64,
+    pub progress_emit_nanos: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreciseDirectoryScan {
     pub listing: DirectoryListing,
     pub summaries: Vec<DirectorySizeSummary>,
+    pub profile: PreciseScanProfile,
 }
 
 #[derive(Debug, Clone)]
@@ -378,6 +391,17 @@ impl LocalHdDriver {
             precise.summaries.len(),
             precise.listing.total_measured_size,
             precise.listing.total_logical_size
+        );
+        log::info!(
+            "precise filesystem scan profile for {}: entries collected {}, worker-time read_dir {:.3}s, file_type {:.3}s, metadata {:.3}s, size {:.3}s, live updates {:.3}s, progress emit {:.3}s",
+            path.display(),
+            precise.profile.entries_collected,
+            nanos_to_seconds(precise.profile.read_dir_nanos),
+            nanos_to_seconds(precise.profile.file_type_nanos),
+            nanos_to_seconds(precise.profile.metadata_nanos),
+            nanos_to_seconds(precise.profile.size_nanos),
+            nanos_to_seconds(precise.profile.live_update_nanos),
+            nanos_to_seconds(precise.profile.progress_emit_nanos)
         );
         let cache_started = Instant::now();
         let entry = self
@@ -759,6 +783,10 @@ fn adjusted_total(total: u64, previous_value: u64, next_value: u64) -> u64 {
     } else {
         total.saturating_sub(previous_value - next_value)
     }
+}
+
+fn nanos_to_seconds(nanos: u64) -> f64 {
+    nanos as f64 / 1_000_000_000.0
 }
 
 fn canonicalize_volume_root(volume_root: &Path) -> DriverResult<PathBuf> {

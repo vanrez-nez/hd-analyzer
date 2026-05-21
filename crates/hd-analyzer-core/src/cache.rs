@@ -220,6 +220,7 @@ mod tests {
             PreciseDirectoryScan {
                 listing: listing("/tmp"),
                 summaries: vec![summary("/tmp/a")],
+                profile: Default::default(),
             },
             CacheFreshness::Fresh,
         );
@@ -254,6 +255,7 @@ mod tests {
             PreciseDirectoryScan {
                 listing: listing("/tmp/a"),
                 summaries: vec![summary("/tmp/a/b"), summary("/tmp/c")],
+                profile: Default::default(),
             },
             CacheFreshness::Fresh,
         );
@@ -269,6 +271,7 @@ mod tests {
             PreciseDirectoryScan {
                 listing,
                 summaries: Vec::new(),
+                profile: Default::default(),
             },
             CacheFreshness::Fresh,
         );

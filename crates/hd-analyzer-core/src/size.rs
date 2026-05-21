@@ -105,6 +105,25 @@ impl HardLinkDedupe {
             deduped,
         }
     }
+
+    pub fn has_seen(&mut self, identity: &SizeIdentity) -> bool {
+        !self.seen.insert(identity.clone())
+    }
+}
+
+pub fn measure_file_without_dedupe(
+    path: &Path,
+    metadata: &Metadata,
+    measurement_mode: SizeMeasurementMode,
+) -> SizeMeasurement {
+    let size = platform_file_size(path, metadata, measurement_mode);
+    SizeMeasurement {
+        allocated_bytes: size.allocated_bytes,
+        logical_bytes: size.logical_bytes,
+        measurement_method: size.measurement_method,
+        identity: hard_link_identity(metadata),
+        deduped: false,
+    }
 }
 
 pub fn directory_measurement(allocated_bytes: u64, logical_bytes: u64) -> SizeMeasurement {

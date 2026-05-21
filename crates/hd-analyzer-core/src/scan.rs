@@ -1,15 +1,19 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
+use rayon::prelude::*;
 
 use crate::driver::{
     DirectoryListing, DirectorySizeSummary, EntryKind, NodeState, PathNode, PreciseDirectoryScan,
-    ReadIssueKind, ScanIssue,
+    PreciseScanProfile, ReadIssueKind, ScanIssue,
 };
 use crate::jobs::CancelToken;
 use crate::rules::ScanConfig;
 use crate::safety::classify_path_safety;
-use crate::size::{HardLinkDedupe, directory_measurement};
+use crate::size::{HardLinkDedupe, directory_measurement, measure_file_without_dedupe};
 
 fn get_device_id(path: &Path) -> Option<u64> {
     #[cfg(unix)]
@@ -346,6 +350,64 @@ pub struct PreciseScanUpdate {
 
 pub type PreciseScanProgressCallback<'a> = dyn Fn(PreciseScanUpdate) + Send + Sync + 'a;
 
+#[derive(Debug, Default)]
+struct ScanProfileRecorder {
+    entries_collected: AtomicU64,
+    read_dir_nanos: AtomicU64,
+    file_type_nanos: AtomicU64,
+    metadata_nanos: AtomicU64,
+    size_nanos: AtomicU64,
+    live_update_nanos: AtomicU64,
+    progress_emit_nanos: AtomicU64,
+}
+
+impl ScanProfileRecorder {
+    fn add_duration(counter: &AtomicU64, duration: Duration) {
+        let nanos = duration.as_nanos().min(u64::MAX as u128) as u64;
+        counter.fetch_add(nanos, Ordering::Relaxed);
+    }
+
+    fn add_entries(&self, count: u64) {
+        self.entries_collected.fetch_add(count, Ordering::Relaxed);
+    }
+
+    fn add_read_dir(&self, duration: Duration) {
+        Self::add_duration(&self.read_dir_nanos, duration);
+    }
+
+    fn add_file_type(&self, duration: Duration) {
+        Self::add_duration(&self.file_type_nanos, duration);
+    }
+
+    fn add_metadata(&self, duration: Duration) {
+        Self::add_duration(&self.metadata_nanos, duration);
+    }
+
+    fn add_size(&self, duration: Duration) {
+        Self::add_duration(&self.size_nanos, duration);
+    }
+
+    fn add_live_update(&self, duration: Duration) {
+        Self::add_duration(&self.live_update_nanos, duration);
+    }
+
+    fn add_progress_emit(&self, duration: Duration) {
+        Self::add_duration(&self.progress_emit_nanos, duration);
+    }
+
+    fn snapshot(&self) -> PreciseScanProfile {
+        PreciseScanProfile {
+            entries_collected: self.entries_collected.load(Ordering::Relaxed),
+            read_dir_nanos: self.read_dir_nanos.load(Ordering::Relaxed),
+            file_type_nanos: self.file_type_nanos.load(Ordering::Relaxed),
+            metadata_nanos: self.metadata_nanos.load(Ordering::Relaxed),
+            size_nanos: self.size_nanos.load(Ordering::Relaxed),
+            live_update_nanos: self.live_update_nanos.load(Ordering::Relaxed),
+            progress_emit_nanos: self.progress_emit_nanos.load(Ordering::Relaxed),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DirectChild {
     path: PathBuf,
@@ -355,6 +417,16 @@ struct DirectChild {
     logical_bytes: u64,
     has_visible_children: bool,
     issues: Vec<ScanIssue>,
+}
+
+#[derive(Debug)]
+struct EntryCandidate {
+    path: PathBuf,
+    name: String,
+    visible: bool,
+    is_dir: bool,
+    is_file: bool,
+    is_symlink: bool,
 }
 
 #[derive(Debug, Default)]
@@ -375,37 +447,28 @@ struct MeasuredDirectory {
 fn discover_directory_precise_inner_with_progress(
     path: &Path,
     config: &ScanConfig,
-    dedupe: &mut HardLinkDedupe,
+    _dedupe: &mut HardLinkDedupe,
     root_device: Option<u64>,
     cancel_token: Option<&CancelToken>,
     progress: Option<&PreciseScanProgressCallback<'_>>,
 ) -> std::io::Result<PreciseDirectoryScan> {
     let config_fingerprint = config.fingerprint();
-    let mut stats = PreciseScanProgress::default();
-    let mut last_progress = Instant::now();
-    let mut live_updates = LiveUpdateCollector::new(config);
+    let shared = ScanSharedState::new(
+        config,
+        root_device,
+        cancel_token,
+        progress,
+        &config_fingerprint,
+    );
     let MeasuredDirectory {
         accumulator: root_accumulator,
         direct_children,
         summaries,
-    } = measure_directory_contents(
-        path,
-        config,
-        dedupe,
-        root_device,
-        cancel_token,
-        progress,
-        &mut stats,
-        &mut last_progress,
-        None,
-        &mut live_updates,
-        true,
-        &config_fingerprint,
-    )?;
-    if let Some(progress) = progress {
-        live_updates.flush_all(progress, &stats);
-        progress(PreciseScanUpdate {
-            progress: stats,
+    } = measure_directory_contents(path, &shared, None, true)?;
+    if progress.is_some() {
+        shared.flush_live_updates();
+        shared.emit(PreciseScanUpdate {
+            progress: shared.stats_snapshot(),
             directory_updates: Vec::new(),
         });
     }
@@ -446,7 +509,7 @@ fn discover_directory_precise_inner_with_progress(
 
     let listing = DirectoryListing {
         path: path.to_path_buf(),
-        config_fingerprint,
+        config_fingerprint: config_fingerprint.clone(),
         children,
         total_visible_size,
         total_measured_size: root_accumulator.allocated_bytes,
@@ -458,7 +521,11 @@ fn discover_directory_precise_inner_with_progress(
         generation: 0,
     };
 
-    Ok(PreciseDirectoryScan { listing, summaries })
+    Ok(PreciseDirectoryScan {
+        listing,
+        summaries,
+        profile: shared.profile_snapshot(),
+    })
 }
 
 fn is_canceled(cancel_token: Option<&CancelToken>) -> bool {
@@ -506,14 +573,13 @@ impl LiveUpdateCollector {
         path: Option<&Path>,
         allocated_bytes: u64,
         logical_bytes: u64,
-        progress: Option<&PreciseScanProgressCallback<'_>>,
-        stats: &PreciseScanProgress,
-    ) {
+        stats: PreciseScanProgress,
+    ) -> Option<PreciseScanUpdate> {
         if !self.enabled {
-            return;
+            return None;
         }
         let Some(path) = path else {
-            return;
+            return None;
         };
 
         let path = path.to_path_buf();
@@ -537,17 +603,14 @@ impl LiveUpdateCollector {
         }
 
         if self.pending.len() >= self.max_batch_size || self.last_flush.elapsed() >= self.throttle {
-            self.flush(progress, stats);
+            return self.flush(stats);
         }
+        None
     }
 
-    fn flush_all(
-        &mut self,
-        progress: &PreciseScanProgressCallback<'_>,
-        stats: &PreciseScanProgress,
-    ) {
+    fn flush_all(&mut self, stats: PreciseScanProgress) -> Option<PreciseScanUpdate> {
         if !self.enabled {
-            return;
+            return None;
         }
 
         for (path, totals) in &self.current {
@@ -566,7 +629,7 @@ impl LiveUpdateCollector {
                 );
             }
         }
-        self.flush(Some(progress), stats);
+        self.flush(stats)
     }
 
     fn should_queue(&self, path: &Path, totals: &LiveDirectoryTotals) -> bool {
@@ -586,16 +649,9 @@ impl LiveUpdateCollector {
             >= self.min_bytes_delta
     }
 
-    fn flush(
-        &mut self,
-        progress: Option<&PreciseScanProgressCallback<'_>>,
-        stats: &PreciseScanProgress,
-    ) {
-        let Some(progress) = progress else {
-            return;
-        };
+    fn flush(&mut self, stats: PreciseScanProgress) -> Option<PreciseScanUpdate> {
         if self.pending.is_empty() {
-            return;
+            return None;
         }
 
         let updates = self
@@ -613,249 +669,431 @@ impl LiveUpdateCollector {
             );
         }
         self.last_flush = Instant::now();
-        progress(PreciseScanUpdate {
-            progress: *stats,
+        Some(PreciseScanUpdate {
+            progress: stats,
             directory_updates: updates,
-        });
+        })
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct ScanSharedState<'a> {
+    config: &'a ScanConfig,
+    root_device: Option<u64>,
+    cancel_token: Option<&'a CancelToken>,
+    progress: Option<&'a PreciseScanProgressCallback<'a>>,
+    config_fingerprint: &'a str,
+    dedupe: Mutex<HardLinkDedupe>,
+    stats: Mutex<PreciseScanProgress>,
+    last_progress: Mutex<Instant>,
+    live_updates: Mutex<LiveUpdateCollector>,
+    emit_lock: Mutex<()>,
+    profile: ScanProfileRecorder,
+}
+
+impl<'a> ScanSharedState<'a> {
+    fn new(
+        config: &'a ScanConfig,
+        root_device: Option<u64>,
+        cancel_token: Option<&'a CancelToken>,
+        progress: Option<&'a PreciseScanProgressCallback<'a>>,
+        config_fingerprint: &'a str,
+    ) -> Self {
+        Self {
+            config,
+            root_device,
+            cancel_token,
+            progress,
+            config_fingerprint,
+            dedupe: Mutex::new(HardLinkDedupe::new()),
+            stats: Mutex::new(PreciseScanProgress::default()),
+            last_progress: Mutex::new(Instant::now()),
+            live_updates: Mutex::new(LiveUpdateCollector::new(config)),
+            emit_lock: Mutex::new(()),
+            profile: ScanProfileRecorder::default(),
+        }
+    }
+
+    fn stats_snapshot(&self) -> PreciseScanProgress {
+        *self.stats.lock().expect("scan stats poisoned")
+    }
+
+    fn add_entries(&self, count: u64) -> PreciseScanProgress {
+        let mut stats = self.stats.lock().expect("scan stats poisoned");
+        stats.entries_visited = stats.entries_visited.saturating_add(count);
+        *stats
+    }
+
+    fn add_directory(&self) -> PreciseScanProgress {
+        let mut stats = self.stats.lock().expect("scan stats poisoned");
+        stats.directories_visited = stats.directories_visited.saturating_add(1);
+        *stats
+    }
+
+    fn add_file(&self, allocated_bytes: u64) -> PreciseScanProgress {
+        let mut stats = self.stats.lock().expect("scan stats poisoned");
+        stats.files_visited = stats.files_visited.saturating_add(1);
+        stats.bytes_measured = stats.bytes_measured.saturating_add(allocated_bytes);
+        *stats
+    }
+
+    fn measure_file(
+        &self,
+        path: &Path,
+        metadata: &std::fs::Metadata,
+    ) -> crate::size::SizeMeasurement {
+        let started = Instant::now();
+        let mut measurement =
+            measure_file_without_dedupe(path, metadata, self.config.size_measurement_mode);
+        if self.config.dedupe_hard_links
+            && measurement.identity.as_ref().is_some_and(|identity| {
+                self.dedupe
+                    .lock()
+                    .expect("hard-link dedupe state poisoned")
+                    .has_seen(identity)
+            })
+        {
+            measurement.allocated_bytes = 0;
+            measurement.deduped = true;
+        }
+        self.profile.add_size(started.elapsed());
+        measurement
+    }
+
+    fn add_live_bytes(
+        &self,
+        path: Option<&Path>,
+        allocated_bytes: u64,
+        logical_bytes: u64,
+        stats: PreciseScanProgress,
+    ) {
+        let started = Instant::now();
+        let update = self
+            .live_updates
+            .lock()
+            .expect("live update state poisoned")
+            .add_bytes(path, allocated_bytes, logical_bytes, stats);
+        self.profile.add_live_update(started.elapsed());
+        if let Some(update) = update {
+            self.emit(update);
+        }
+    }
+
+    fn flush_live_updates(&self) {
+        let stats = self.stats_snapshot();
+        let update = self
+            .live_updates
+            .lock()
+            .expect("live update state poisoned")
+            .flush_all(stats);
+        if let Some(update) = update {
+            self.emit(update);
+        }
+    }
+
+    fn publish_progress_if_due(&self) {
+        let Some(_progress) = self.progress else {
+            return;
+        };
+        let mut last_progress = self.last_progress.lock().expect("progress state poisoned");
+        if last_progress.elapsed() < Duration::from_millis(250) {
+            return;
+        }
+        *last_progress = Instant::now();
+        drop(last_progress);
+        self.emit(PreciseScanUpdate {
+            progress: self.stats_snapshot(),
+            directory_updates: Vec::new(),
+        });
+    }
+
+    fn emit(&self, update: PreciseScanUpdate) {
+        let Some(progress) = self.progress else {
+            return;
+        };
+        let started = Instant::now();
+        let _guard = self.emit_lock.lock().expect("progress emit state poisoned");
+        progress(update);
+        self.profile.add_progress_emit(started.elapsed());
+    }
+
+    fn profile_snapshot(&self) -> PreciseScanProfile {
+        self.profile.snapshot()
+    }
+}
+
 fn measure_directory_contents(
     path: &Path,
-    config: &ScanConfig,
-    dedupe: &mut HardLinkDedupe,
-    root_device: Option<u64>,
-    cancel_token: Option<&CancelToken>,
-    progress: Option<&PreciseScanProgressCallback<'_>>,
-    stats: &mut PreciseScanProgress,
-    last_progress: &mut Instant,
+    shared: &ScanSharedState<'_>,
     live_child_path: Option<&Path>,
-    live_updates: &mut LiveUpdateCollector,
     collect_direct_children: bool,
-    config_fingerprint: &str,
 ) -> std::io::Result<MeasuredDirectory> {
-    if is_canceled(cancel_token) {
+    if is_canceled(shared.cancel_token) {
         return Err(canceled_error());
     }
 
     let mut measured = MeasuredDirectory::default();
-    let entries = match std::fs::read_dir(path) {
+    let (candidates, issues) = collect_entry_candidates(path, shared)?;
+    measured.accumulator.issues.extend(issues);
+
+    let entries = candidates
+        .into_par_iter()
+        .map(|candidate| measure_entry(candidate, shared, live_child_path, collect_direct_children))
+        .collect::<Vec<_>>();
+
+    for entry in entries {
+        let entry = entry?;
+        measured.accumulator.allocated_bytes = measured
+            .accumulator
+            .allocated_bytes
+            .saturating_add(entry.allocated_bytes);
+        measured.accumulator.logical_bytes = measured
+            .accumulator
+            .logical_bytes
+            .saturating_add(entry.logical_bytes);
+        measured.accumulator.has_visible_children |= entry.visible;
+        measured.accumulator.issues.extend(entry.issues);
+        measured.summaries.extend(entry.summaries);
+        if let Some(direct_child) = entry.direct_child {
+            measured.direct_children.push(direct_child);
+        }
+    }
+
+    Ok(measured)
+}
+
+fn collect_entry_candidates(
+    path: &Path,
+    shared: &ScanSharedState<'_>,
+) -> std::io::Result<(Vec<EntryCandidate>, Vec<ScanIssue>)> {
+    let read_started = Instant::now();
+    let mut entries = match std::fs::read_dir(path) {
         Ok(entries) => entries,
         Err(error) => {
             if is_permission_denied(&error) || path.exists() {
-                measured
-                    .accumulator
-                    .issues
-                    .push(filesystem_issue(path.to_path_buf(), error));
-                return Ok(measured);
+                shared.profile.add_read_dir(read_started.elapsed());
+                return Ok((
+                    Vec::new(),
+                    vec![filesystem_issue(path.to_path_buf(), error)],
+                ));
             }
+            shared.profile.add_read_dir(read_started.elapsed());
             return Err(error);
         }
     };
+    shared.profile.add_read_dir(read_started.elapsed());
 
-    for entry_result in entries {
-        if is_canceled(cancel_token) {
+    let mut candidates = Vec::new();
+    let mut issues = Vec::new();
+    loop {
+        if is_canceled(shared.cancel_token) {
             return Err(canceled_error());
         }
+
+        let read_next_started = Instant::now();
+        let entry_result = entries.next();
+        shared.profile.add_read_dir(read_next_started.elapsed());
+        let Some(entry_result) = entry_result else {
+            break;
+        };
 
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(error) => {
-                measured
-                    .accumulator
-                    .issues
-                    .push(filesystem_issue(path.to_path_buf(), error));
+                issues.push(filesystem_issue(path.to_path_buf(), error));
                 continue;
             }
         };
 
         let entry_path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
-        let is_visible_by_config = !config.is_hidden_name(&name);
+        let is_visible_by_config = !shared.config.is_hidden_name(&name);
+        let file_type_started = Instant::now();
         let file_type = match entry.file_type() {
             Ok(file_type) => file_type,
             Err(error) => {
-                measured
-                    .accumulator
-                    .issues
-                    .push(filesystem_issue(entry_path, error));
+                shared.profile.add_file_type(file_type_started.elapsed());
+                issues.push(filesystem_issue(entry_path, error));
                 continue;
             }
         };
-
-        stats.entries_visited = stats.entries_visited.saturating_add(1);
-        if file_type.is_symlink() && !config.follow_symlinks {
-            match std::fs::symlink_metadata(&entry_path) {
-                Ok(metadata) => {
-                    let file = dedupe.measure_file_with_policy(
-                        &entry_path,
-                        &metadata,
-                        config.dedupe_hard_links,
-                        config.size_measurement_mode,
-                    );
-                    stats.files_visited = stats.files_visited.saturating_add(1);
-                    stats.bytes_measured =
-                        stats.bytes_measured.saturating_add(file.allocated_bytes);
-                    live_updates.add_bytes(
-                        live_child_path,
-                        file.allocated_bytes,
-                        file.logical_bytes,
-                        progress,
-                        stats,
-                    );
-                    measured.accumulator.allocated_bytes = measured
-                        .accumulator
-                        .allocated_bytes
-                        .saturating_add(file.allocated_bytes);
-                    measured.accumulator.logical_bytes = measured
-                        .accumulator
-                        .logical_bytes
-                        .saturating_add(file.logical_bytes);
-                    if is_visible_by_config {
-                        measured.accumulator.has_visible_children = true;
-                        if collect_direct_children {
-                            measured.direct_children.push(DirectChild {
-                                path: entry_path,
-                                name,
-                                kind: EntryKind::File,
-                                allocated_bytes: file.allocated_bytes,
-                                logical_bytes: file.logical_bytes,
-                                has_visible_children: false,
-                                issues: Vec::new(),
-                            });
-                        }
-                    }
-                }
-                Err(error) => measured
-                    .accumulator
-                    .issues
-                    .push(filesystem_issue(entry_path, error)),
-            }
-            publish_precise_progress(progress, stats, last_progress);
-            continue;
-        }
-
-        if file_type.is_dir() {
-            stats.directories_visited = stats.directories_visited.saturating_add(1);
-            if crosses_filesystem_boundary_path(&entry_path, root_device) {
-                if is_visible_by_config {
-                    measured.accumulator.issues.push(ScanIssue {
-                        path: entry_path,
-                        kind: ReadIssueKind::FilesystemBoundary,
-                        message: "Directory is on a different filesystem.".to_string(),
-                    });
-                }
-                continue;
-            }
-
-            let child = measure_directory_contents(
-                &entry_path,
-                config,
-                dedupe,
-                root_device,
-                cancel_token,
-                progress,
-                stats,
-                last_progress,
-                if collect_direct_children && is_visible_by_config {
-                    Some(entry_path.as_path())
-                } else {
-                    live_child_path
-                },
-                live_updates,
-                false,
-                config_fingerprint,
-            )?;
-            measured.accumulator.allocated_bytes = measured
-                .accumulator
-                .allocated_bytes
-                .saturating_add(child.accumulator.allocated_bytes);
-            measured.accumulator.logical_bytes = measured
-                .accumulator
-                .logical_bytes
-                .saturating_add(child.accumulator.logical_bytes);
-            measured
-                .accumulator
-                .issues
-                .extend(child.accumulator.issues.clone());
-            measured.summaries.extend(child.summaries);
-            measured.summaries.push(DirectorySizeSummary {
-                path: entry_path.clone(),
-                config_fingerprint: config_fingerprint.to_string(),
-                allocated_size: child.accumulator.allocated_bytes,
-                logical_size: child.accumulator.logical_bytes,
-                has_visible_children: child.accumulator.has_visible_children,
-                issues: child.accumulator.issues.clone(),
-            });
-
-            if is_visible_by_config {
-                measured.accumulator.has_visible_children = true;
-                if collect_direct_children {
-                    measured.direct_children.push(DirectChild {
-                        path: entry_path,
-                        name,
-                        kind: EntryKind::Directory,
-                        allocated_bytes: child.accumulator.allocated_bytes,
-                        logical_bytes: child.accumulator.logical_bytes,
-                        has_visible_children: child.accumulator.has_visible_children,
-                        issues: child.accumulator.issues,
-                    });
-                }
-            }
-        } else if file_type.is_file() {
-            match entry.metadata() {
-                Ok(metadata) => {
-                    let file = dedupe.measure_file_with_policy(
-                        &entry_path,
-                        &metadata,
-                        config.dedupe_hard_links,
-                        config.size_measurement_mode,
-                    );
-                    stats.files_visited = stats.files_visited.saturating_add(1);
-                    stats.bytes_measured =
-                        stats.bytes_measured.saturating_add(file.allocated_bytes);
-                    live_updates.add_bytes(
-                        live_child_path,
-                        file.allocated_bytes,
-                        file.logical_bytes,
-                        progress,
-                        stats,
-                    );
-                    measured.accumulator.allocated_bytes = measured
-                        .accumulator
-                        .allocated_bytes
-                        .saturating_add(file.allocated_bytes);
-                    measured.accumulator.logical_bytes = measured
-                        .accumulator
-                        .logical_bytes
-                        .saturating_add(file.logical_bytes);
-                    if is_visible_by_config {
-                        measured.accumulator.has_visible_children = true;
-                        if collect_direct_children {
-                            measured.direct_children.push(DirectChild {
-                                path: entry_path,
-                                name,
-                                kind: EntryKind::File,
-                                allocated_bytes: file.allocated_bytes,
-                                logical_bytes: file.logical_bytes,
-                                has_visible_children: false,
-                                issues: Vec::new(),
-                            });
-                        }
-                    }
-                }
-                Err(error) => measured
-                    .accumulator
-                    .issues
-                    .push(filesystem_issue(entry_path, error)),
-            }
-        }
-
-        publish_precise_progress(progress, stats, last_progress);
+        shared.profile.add_file_type(file_type_started.elapsed());
+        candidates.push(EntryCandidate {
+            path: entry_path,
+            name,
+            visible: is_visible_by_config,
+            is_dir: file_type.is_dir(),
+            is_file: file_type.is_file(),
+            is_symlink: file_type.is_symlink(),
+        });
     }
 
-    Ok(measured)
+    shared.profile.add_entries(candidates.len() as u64);
+    shared.add_entries(candidates.len() as u64);
+    shared.publish_progress_if_due();
+    Ok((candidates, issues))
+}
+
+#[derive(Debug, Default)]
+struct MeasuredEntry {
+    allocated_bytes: u64,
+    logical_bytes: u64,
+    visible: bool,
+    issues: Vec<ScanIssue>,
+    summaries: Vec<DirectorySizeSummary>,
+    direct_child: Option<DirectChild>,
+}
+
+fn measure_entry(
+    candidate: EntryCandidate,
+    shared: &ScanSharedState<'_>,
+    live_child_path: Option<&Path>,
+    collect_direct_children: bool,
+) -> std::io::Result<MeasuredEntry> {
+    if is_canceled(shared.cancel_token) {
+        return Err(canceled_error());
+    }
+
+    if candidate.is_symlink && !shared.config.follow_symlinks {
+        return Ok(measure_file_entry(
+            candidate,
+            shared,
+            live_child_path,
+            collect_direct_children,
+            true,
+        ));
+    }
+
+    if candidate.is_dir {
+        return measure_directory_entry(
+            candidate,
+            shared,
+            live_child_path,
+            collect_direct_children,
+        );
+    }
+
+    if candidate.is_file {
+        return Ok(measure_file_entry(
+            candidate,
+            shared,
+            live_child_path,
+            collect_direct_children,
+            false,
+        ));
+    }
+
+    Ok(MeasuredEntry::default())
+}
+
+fn measure_file_entry(
+    candidate: EntryCandidate,
+    shared: &ScanSharedState<'_>,
+    live_child_path: Option<&Path>,
+    collect_direct_children: bool,
+    symlink_metadata: bool,
+) -> MeasuredEntry {
+    let metadata_started = Instant::now();
+    let metadata = if symlink_metadata {
+        std::fs::symlink_metadata(&candidate.path)
+    } else {
+        std::fs::metadata(&candidate.path)
+    };
+    shared.profile.add_metadata(metadata_started.elapsed());
+
+    let metadata = match metadata {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return MeasuredEntry {
+                issues: vec![filesystem_issue(candidate.path, error)],
+                ..MeasuredEntry::default()
+            };
+        }
+    };
+
+    let file = shared.measure_file(&candidate.path, &metadata);
+    let stats = shared.add_file(file.allocated_bytes);
+    shared.add_live_bytes(
+        live_child_path,
+        file.allocated_bytes,
+        file.logical_bytes,
+        stats,
+    );
+    shared.publish_progress_if_due();
+
+    let direct_child = (candidate.visible && collect_direct_children).then(|| DirectChild {
+        path: candidate.path,
+        name: candidate.name,
+        kind: EntryKind::File,
+        allocated_bytes: file.allocated_bytes,
+        logical_bytes: file.logical_bytes,
+        has_visible_children: false,
+        issues: Vec::new(),
+    });
+
+    MeasuredEntry {
+        allocated_bytes: file.allocated_bytes,
+        logical_bytes: file.logical_bytes,
+        visible: candidate.visible,
+        direct_child,
+        ..MeasuredEntry::default()
+    }
+}
+
+fn measure_directory_entry(
+    candidate: EntryCandidate,
+    shared: &ScanSharedState<'_>,
+    live_child_path: Option<&Path>,
+    collect_direct_children: bool,
+) -> std::io::Result<MeasuredEntry> {
+    shared.add_directory();
+    if crosses_filesystem_boundary_path(&candidate.path, shared.root_device) {
+        if candidate.visible {
+            return Ok(MeasuredEntry {
+                issues: vec![ScanIssue {
+                    path: candidate.path,
+                    kind: ReadIssueKind::FilesystemBoundary,
+                    message: "Directory is on a different filesystem.".to_string(),
+                }],
+                ..MeasuredEntry::default()
+            });
+        }
+        return Ok(MeasuredEntry::default());
+    }
+
+    let next_live_child_path = if collect_direct_children && candidate.visible {
+        Some(candidate.path.as_path())
+    } else {
+        live_child_path
+    };
+    let child = measure_directory_contents(&candidate.path, shared, next_live_child_path, false)?;
+    let mut summaries = child.summaries;
+    summaries.push(DirectorySizeSummary {
+        path: candidate.path.clone(),
+        config_fingerprint: shared.config_fingerprint.to_string(),
+        allocated_size: child.accumulator.allocated_bytes,
+        logical_size: child.accumulator.logical_bytes,
+        has_visible_children: child.accumulator.has_visible_children,
+        issues: child.accumulator.issues.clone(),
+    });
+
+    let direct_child = (candidate.visible && collect_direct_children).then(|| DirectChild {
+        path: candidate.path,
+        name: candidate.name,
+        kind: EntryKind::Directory,
+        allocated_bytes: child.accumulator.allocated_bytes,
+        logical_bytes: child.accumulator.logical_bytes,
+        has_visible_children: child.accumulator.has_visible_children,
+        issues: child.accumulator.issues.clone(),
+    });
+
+    Ok(MeasuredEntry {
+        allocated_bytes: child.accumulator.allocated_bytes,
+        logical_bytes: child.accumulator.logical_bytes,
+        visible: candidate.visible,
+        issues: child.accumulator.issues,
+        summaries,
+        direct_child,
+    })
 }
 
 fn filesystem_issue(path: PathBuf, error: std::io::Error) -> ScanIssue {
@@ -875,24 +1113,6 @@ fn is_permission_denied(error: &std::io::Error) -> bool {
     error.kind() == std::io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(1)
 }
 
-fn publish_precise_progress(
-    progress: Option<&PreciseScanProgressCallback<'_>>,
-    stats: &PreciseScanProgress,
-    last_progress: &mut Instant,
-) {
-    let Some(progress) = progress else {
-        return;
-    };
-
-    if last_progress.elapsed() >= Duration::from_millis(250) {
-        progress(PreciseScanUpdate {
-            progress: *stats,
-            directory_updates: Vec::new(),
-        });
-        *last_progress = Instant::now();
-    }
-}
-
 fn crosses_filesystem_boundary_path(path: &Path, root_device: Option<u64>) -> bool {
     let Some(root_device) = root_device else {
         return false;
@@ -909,6 +1129,150 @@ fn crosses_filesystem_boundary_path(path: &Path, root_device: Option<u64>) -> bo
         let _ = path;
         false
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanBenchmarkMode {
+    FileTypes,
+    Metadata,
+    SizeMeasurement,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanBenchmarkReport {
+    pub entries_visited: u64,
+    pub files_visited: u64,
+    pub directories_visited: u64,
+    pub bytes_measured: u64,
+    pub elapsed_nanos: u64,
+    pub read_dir_nanos: u64,
+    pub file_type_nanos: u64,
+    pub metadata_nanos: u64,
+    pub size_nanos: u64,
+}
+
+pub fn benchmark_directory_walk(
+    path: &Path,
+    config: &ScanConfig,
+    mode: ScanBenchmarkMode,
+) -> std::io::Result<ScanBenchmarkReport> {
+    let started = Instant::now();
+    let path = path.canonicalize()?;
+    let root_device = if config.stay_on_filesystem {
+        get_device_id(&path)
+    } else {
+        None
+    };
+    let mut report = ScanBenchmarkReport::default();
+    let mut dedupe = HardLinkDedupe::new();
+    benchmark_directory_walk_inner(&path, config, mode, root_device, &mut dedupe, &mut report)?;
+    report.elapsed_nanos = duration_nanos(started.elapsed());
+    Ok(report)
+}
+
+fn benchmark_directory_walk_inner(
+    path: &Path,
+    config: &ScanConfig,
+    mode: ScanBenchmarkMode,
+    root_device: Option<u64>,
+    dedupe: &mut HardLinkDedupe,
+    report: &mut ScanBenchmarkReport,
+) -> std::io::Result<()> {
+    let read_started = Instant::now();
+    let mut entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) => {
+            report.read_dir_nanos = report
+                .read_dir_nanos
+                .saturating_add(duration_nanos(read_started.elapsed()));
+            if is_permission_denied(&error) || path.exists() {
+                return Ok(());
+            }
+            return Err(error);
+        }
+    };
+    report.read_dir_nanos = report
+        .read_dir_nanos
+        .saturating_add(duration_nanos(read_started.elapsed()));
+
+    loop {
+        let read_next_started = Instant::now();
+        let entry_result = entries.next();
+        report.read_dir_nanos = report
+            .read_dir_nanos
+            .saturating_add(duration_nanos(read_next_started.elapsed()));
+        let Some(entry_result) = entry_result else {
+            break;
+        };
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let entry_path = entry.path();
+        let file_type_started = Instant::now();
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => {
+                report.file_type_nanos = report
+                    .file_type_nanos
+                    .saturating_add(duration_nanos(file_type_started.elapsed()));
+                continue;
+            }
+        };
+        report.file_type_nanos = report
+            .file_type_nanos
+            .saturating_add(duration_nanos(file_type_started.elapsed()));
+        report.entries_visited = report.entries_visited.saturating_add(1);
+
+        if file_type.is_dir() {
+            report.directories_visited = report.directories_visited.saturating_add(1);
+            if crosses_filesystem_boundary_path(&entry_path, root_device) {
+                continue;
+            }
+            benchmark_directory_walk_inner(&entry_path, config, mode, root_device, dedupe, report)?;
+            continue;
+        }
+
+        if file_type.is_file() || (file_type.is_symlink() && !config.follow_symlinks) {
+            report.files_visited = report.files_visited.saturating_add(1);
+            if mode == ScanBenchmarkMode::FileTypes {
+                continue;
+            }
+            let metadata_started = Instant::now();
+            let metadata = if file_type.is_symlink() && !config.follow_symlinks {
+                std::fs::symlink_metadata(&entry_path)
+            } else {
+                std::fs::metadata(&entry_path)
+            };
+            report.metadata_nanos = report
+                .metadata_nanos
+                .saturating_add(duration_nanos(metadata_started.elapsed()));
+            let Ok(metadata) = metadata else {
+                continue;
+            };
+            if mode == ScanBenchmarkMode::SizeMeasurement {
+                let size_started = Instant::now();
+                let measurement = dedupe.measure_file_with_policy(
+                    &entry_path,
+                    &metadata,
+                    config.dedupe_hard_links,
+                    config.size_measurement_mode,
+                );
+                report.size_nanos = report
+                    .size_nanos
+                    .saturating_add(duration_nanos(size_started.elapsed()));
+                report.bytes_measured = report
+                    .bytes_measured
+                    .saturating_add(measurement.allocated_bytes);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn duration_nanos(duration: Duration) -> u64 {
+    duration.as_nanos().min(u64::MAX as u128) as u64
 }
 
 #[cfg(test)]
