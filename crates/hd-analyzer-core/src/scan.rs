@@ -15,6 +15,9 @@ use crate::rules::ScanConfig;
 use crate::safety::classify_path_safety;
 use crate::size::{HardLinkDedupe, directory_measurement, measure_file_without_dedupe};
 
+const OPEN_PROGRESS_CHECK_INTERVAL: u64 = 512;
+const OPEN_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(250);
+
 fn get_device_id(path: &Path) -> Option<u64> {
     #[cfg(unix)]
     {
@@ -29,9 +32,20 @@ fn get_device_id(path: &Path) -> Option<u64> {
 }
 
 pub fn discover_directory(path: &Path, config: &ScanConfig) -> std::io::Result<DirectoryListing> {
+    discover_directory_with_progress(path, config, None)
+}
+
+pub fn discover_directory_with_progress(
+    path: &Path,
+    config: &ScanConfig,
+    progress: Option<&DirectoryOpenProgressCallback<'_>>,
+) -> std::io::Result<DirectoryListing> {
     let path = path.canonicalize()?;
     let mut dedupe = HardLinkDedupe::new();
-    discover_directory_inner(&path, &path, config, 0, &mut dedupe)
+    let mut progress = DirectoryOpenProgressState::new(progress);
+    let listing = discover_directory_inner(&path, &path, config, 0, &mut dedupe, &mut progress)?;
+    progress.finish();
+    Ok(listing)
 }
 
 pub fn discover_directory_with_precise_sizes(
@@ -78,6 +92,7 @@ fn discover_directory_inner(
     config: &ScanConfig,
     depth: usize,
     dedupe: &mut HardLinkDedupe,
+    progress: &mut DirectoryOpenProgressState<'_>,
 ) -> std::io::Result<DirectoryListing> {
     let mut children = Vec::new();
     let mut issues = Vec::new();
@@ -99,6 +114,7 @@ fn discover_directory_inner(
         .follow_links(config.follow_symlinks);
 
     for entry_result in entries {
+        progress.record_entry();
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(error) => {
@@ -189,7 +205,7 @@ fn discover_directory_inner(
             }
 
             let (size, logical_size, children_known, node_issues, node_state) =
-                measure_directory_node(root, &entry_path, config, depth + 1, dedupe);
+                measure_directory_node(root, &entry_path, config, depth + 1, dedupe, progress);
             issues.extend(node_issues.clone());
             total_measured_size = total_measured_size.saturating_add(size);
             total_logical_size = total_logical_size.saturating_add(logical_size);
@@ -283,12 +299,13 @@ fn measure_directory_node(
     config: &ScanConfig,
     depth: usize,
     dedupe: &mut HardLinkDedupe,
+    progress: &mut DirectoryOpenProgressState<'_>,
 ) -> (u64, u64, bool, Vec<ScanIssue>, NodeState) {
     if depth > config.preload_depth {
         return (0, 0, false, Vec::new(), NodeState::Queued);
     }
 
-    match discover_directory_inner(root, path, config, depth, dedupe) {
+    match discover_directory_inner(root, path, config, depth, dedupe, progress) {
         Ok(listing) => {
             let measurement =
                 directory_measurement(listing.total_measured_size, listing.total_logical_size);
@@ -324,6 +341,62 @@ fn measure_directory_node(
             }],
             NodeState::Failed,
         ),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DirectoryOpenProgress {
+    pub entries_processed: u64,
+}
+
+pub type DirectoryOpenProgressCallback<'a> = dyn Fn(DirectoryOpenProgress) + Send + Sync + 'a;
+
+struct DirectoryOpenProgressState<'a> {
+    progress: Option<&'a DirectoryOpenProgressCallback<'a>>,
+    entries_processed: u64,
+    last_emitted_entries: u64,
+    last_emit: Instant,
+}
+
+impl<'a> DirectoryOpenProgressState<'a> {
+    fn new(progress: Option<&'a DirectoryOpenProgressCallback<'a>>) -> Self {
+        Self {
+            progress,
+            entries_processed: 0,
+            last_emitted_entries: 0,
+            last_emit: Instant::now(),
+        }
+    }
+
+    fn record_entry(&mut self) {
+        if self.progress.is_none() {
+            return;
+        }
+
+        self.entries_processed = self.entries_processed.saturating_add(1);
+        if self.entries_processed % OPEN_PROGRESS_CHECK_INTERVAL == 0
+            && self.last_emit.elapsed() >= OPEN_PROGRESS_EMIT_INTERVAL
+        {
+            self.emit();
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.progress.is_some() && self.entries_processed != self.last_emitted_entries {
+            self.emit();
+        }
+    }
+
+    fn emit(&mut self) {
+        let Some(progress) = self.progress else {
+            return;
+        };
+
+        progress(DirectoryOpenProgress {
+            entries_processed: self.entries_processed,
+        });
+        self.last_emitted_entries = self.entries_processed;
+        self.last_emit = Instant::now();
     }
 }
 
@@ -1349,6 +1422,30 @@ mod tests {
             .unwrap();
         assert_eq!(top_node.state, NodeState::Partial);
         assert_eq!(top_node.size, 0);
+    }
+
+    #[test]
+    fn discover_directory_with_progress_reports_open_entries() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("one.txt"), b"1").unwrap();
+        std::fs::write(dir.path().join("two.txt"), b"2").unwrap();
+        let updates = Mutex::new(Vec::new());
+        let progress_callback = |progress: DirectoryOpenProgress| {
+            updates.lock().unwrap().push(progress.entries_processed);
+        };
+
+        let listing = discover_directory_with_progress(
+            dir.path(),
+            &ScanConfig {
+                min_visible_folder_bytes: None,
+                ..ScanConfig::default()
+            },
+            Some(&progress_callback),
+        )
+        .unwrap();
+
+        assert_eq!(listing.children.len(), 2);
+        assert_eq!(updates.lock().unwrap().last().copied(), Some(2));
     }
 
     #[test]

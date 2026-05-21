@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PanelRightOpenIcon, RefreshCwIcon } from "lucide-react"
 
-import { fsListVolumes, fsOpenPath, fsStartScan } from "@/api"
+import { fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -22,6 +22,11 @@ import type {
 import { defaultScanConfig } from "./types"
 
 type LiveDirectoryUpdates = Record<string, Record<string, DirectoryProgressUpdateDto>>
+type PendingNavigation = {
+  entriesProcessed: number
+  path: string
+  phase: "opening" | "scanning"
+}
 
 type FsExplorerProps = {
   explorerSelectionAnchorId: string | null
@@ -49,10 +54,12 @@ export function FsExplorer({
   const [currentPath, setCurrentPath] = useState<string>()
   const [cache, setCache] = useState<ExplorerCache>(() => createExplorerCache())
   const [loadingPath, setLoadingPath] = useState<string>()
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>()
   const [scanProgress, setScanProgress] = useState<ProgressSnapshotDto>()
   const [liveUpdates, setLiveUpdates] = useState<LiveDirectoryUpdates>({})
   const [error, setError] = useState<string>()
   const activeScansRef = useRef<Set<string>>(new Set())
+  const navigationRequestRef = useRef(0)
 
   const listing = useMemo(
     () => (currentPath ? getCachedListing(cache, currentPath) : undefined),
@@ -86,6 +93,7 @@ export function FsExplorer({
     }
   }, [listing, liveUpdates])
   const canReloadCurrentPath = Boolean(selectedVolume && currentPath)
+  const isNavigationPending = Boolean(pendingNavigation)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
 
   useEffect(() => {
@@ -138,9 +146,19 @@ export function FsExplorer({
       }
       if (event.event === "progressSnapshot") {
         setScanProgress(event.data.snapshot)
+        setPendingNavigation((pending) =>
+          pending && scanSnapshotMatchesPath(event.data.snapshot, pending.path)
+            ? { ...pending, entriesProcessed: event.data.snapshot.completedUnits, phase: "scanning" }
+            : pending,
+        )
       }
       if (event.event === "directoryProgress") {
         setScanProgress(event.data.snapshot)
+        setPendingNavigation((pending) =>
+          pending && (event.data.path === pending.path || scanSnapshotMatchesPath(event.data.snapshot, pending.path))
+            ? { ...pending, entriesProcessed: event.data.snapshot.completedUnits, phase: "scanning" }
+            : pending,
+        )
         setLiveUpdates((updates) => ({
           ...updates,
           [event.data.path]: {
@@ -151,8 +169,9 @@ export function FsExplorer({
       }
       if (event.event === "jobFinished" || event.event === "jobFailed") {
         activeScansRef.current.delete(scanKey(event.data.path))
-        setLoadingPath(undefined)
+        setLoadingPath((loadingPath) => (loadingPath === event.data.path ? undefined : loadingPath))
         setScanProgress(undefined)
+        setPendingNavigation((pending) => (pending?.path === event.data.path ? undefined : pending))
         setLiveUpdates((updates) => {
           if (!updates[event.data.path]) {
             return updates
@@ -170,7 +189,7 @@ export function FsExplorer({
     async (path: string, volumeRoot: string, replaceExisting = false) => {
       const key = scanKey(path)
       if (!replaceExisting && activeScansRef.current.has(key)) {
-        return
+        return false
       }
 
       activeScansRef.current.add(key)
@@ -191,6 +210,7 @@ export function FsExplorer({
       })
       try {
         await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress, replaceExisting)
+        return true
       } catch (error) {
         activeScansRef.current.delete(key)
         throw error
@@ -205,21 +225,58 @@ export function FsExplorer({
         return
       }
       const volumeRoot = volume.mountPoint
-      setCurrentPath(path)
       const cached = getCachedListing(cache, path)
-      if (cached) return
+      if (cached) {
+        navigationRequestRef.current += 1
+        setCurrentPath(cached.path)
+        setPendingNavigation(undefined)
+        setLoadingPath(undefined)
+        setError(undefined)
+        return
+      }
 
+      const requestId = navigationRequestRef.current + 1
+      navigationRequestRef.current = requestId
+      setError(undefined)
       setLoadingPath(path)
+      setPendingNavigation({ entriesProcessed: 0, path, phase: "opening" })
       try {
-        const listing = await fsOpenPath(path, volumeRoot, defaultScanConfig)
+        const listing = await fsOpenPathWithProgress(path, volumeRoot, defaultScanConfig, (progress) => {
+          if (navigationRequestRef.current !== requestId) {
+            return
+          }
+
+          setPendingNavigation((pending) =>
+            pending?.path === path
+              ? { ...pending, entriesProcessed: progress.entriesProcessed, phase: "opening" }
+              : pending,
+          )
+        })
+        if (navigationRequestRef.current !== requestId) {
+          return
+        }
+
         mergeListing(listing)
+        setCurrentPath(listing.path)
         if (listingNeedsScan(listing)) {
-          await startScan(path, volumeRoot)
+          setLoadingPath(listing.path)
+          setPendingNavigation({ entriesProcessed: 0, path: listing.path, phase: "scanning" })
+          const started = await startScan(listing.path, volumeRoot)
+          if (!started) {
+            setPendingNavigation(undefined)
+            setLoadingPath(undefined)
+          }
         } else {
+          setPendingNavigation(undefined)
           setLoadingPath(undefined)
         }
       } catch (error) {
+        if (navigationRequestRef.current !== requestId) {
+          return
+        }
+
         setError(error instanceof Error ? error.message : String(error))
+        setPendingNavigation(undefined)
         setLoadingPath(undefined)
       }
     },
@@ -244,18 +301,26 @@ export function FsExplorer({
 
     setError(undefined)
     setLoadingPath(currentPath)
+    setPendingNavigation({ entriesProcessed: 0, path: currentPath, phase: "scanning" })
     try {
-      await startScan(currentPath, selectedVolume.mountPoint, true)
+      const started = await startScan(currentPath, selectedVolume.mountPoint, true)
+      if (!started) {
+        setPendingNavigation(undefined)
+        setLoadingPath(undefined)
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
+      setPendingNavigation(undefined)
       setLoadingPath(undefined)
     }
   }, [currentPath, selectedVolume, startScan])
 
   const returnToVolumes = () => {
+    navigationRequestRef.current += 1
     setSelectedVolume(undefined)
     setCurrentPath(undefined)
     setLoadingPath(undefined)
+    setPendingNavigation(undefined)
     setError(undefined)
   }
 
@@ -267,6 +332,7 @@ export function FsExplorer({
             path={currentPath}
             rootPath={selectedVolume?.mountPoint}
             rootLabel={selectedVolume?.label}
+            disabled={isNavigationPending}
             onNavigate={(path) => void openPath(path)}
             onBackToRoot={returnToVolumes}
           />
@@ -278,7 +344,7 @@ export function FsExplorer({
               variant="outline"
               size="icon-sm"
               aria-label="Reload current path"
-              disabled={isReloadingCurrentPath}
+              disabled={isReloadingCurrentPath || isNavigationPending}
               onClick={() => void reloadCurrentPath()}
             >
               {isReloadingCurrentPath ? (
@@ -307,6 +373,7 @@ export function FsExplorer({
         volumes={volumes}
         listing={displayListing}
         loadingPath={loadingPath}
+        busyOverlay={pendingNavigation}
         selectedItemIds={selectedItemIds}
         selectionAnchorId={explorerSelectionAnchorId}
         onOpenVolume={openVolume}
@@ -324,6 +391,10 @@ function listingNeedsScan(listing: DirectoryListingDto) {
 
 function scanKey(path: string) {
   return `${path}::${JSON.stringify(defaultScanConfig)}`
+}
+
+function scanSnapshotMatchesPath(snapshot: ProgressSnapshotDto, path: string) {
+  return snapshot.activePaths.includes(path)
 }
 
 function volumeToVisualizerItem(volume: DriveDto): VisualizerCellInput {

@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use hd_analyzer_core::{
-    DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, DirectoryProgressUpdate,
-    DriverEvent, EntryKind, InvalidationReceipt, InvalidationScope, LiveUpdateConfig, NodeState,
-    PathDeleteSafety, PathNode, ProgressSnapshot, ScanConfig, ScanIssue, SizeMeasurementMode,
-    StartScanReceipt, Volume,
+    DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, DirectoryOpenProgress,
+    DirectoryProgressUpdate, DriverEvent, EntryKind, InvalidationReceipt, InvalidationScope,
+    LiveUpdateConfig, NodeState, PathDeleteSafety, PathNode, ProgressSnapshot, ScanConfig,
+    ScanIssue, SizeMeasurementMode, StartScanReceipt, Volume,
 };
 use serde::{Deserialize, Serialize};
 
@@ -194,6 +194,22 @@ impl From<&DirectoryListing> for DirectoryListingDto {
             has_more_depth: listing.has_more_depth,
             issues: listing.issues.iter().map(ScanIssueDto::from).collect(),
             generation: listing.generation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FsOpenProgressEventDto {
+    pub path: String,
+    pub entries_processed: u64,
+}
+
+impl FsOpenProgressEventDto {
+    pub fn new(path: String, progress: DirectoryOpenProgress) -> Self {
+        Self {
+            path,
+            entries_processed: progress.entries_processed,
         }
     }
 }
@@ -422,6 +438,7 @@ pub enum CommandErrorCode {
     PathOutsideVolume,
     DriverUnavailable,
     JobNotFound,
+    OpenItemFailed,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

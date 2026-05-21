@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 
 type PathButtonGroupProps = {
+  disabled?: boolean
   path?: string
   rootPath?: string
   rootLabel?: string
@@ -15,6 +16,7 @@ type PathButtonGroupProps = {
 const DEFAULT_LABEL_MAX_LENGTH = 45
 
 export function PathButtonGroup({
+  disabled = false,
   path,
   rootPath,
   rootLabel,
@@ -37,6 +39,7 @@ export function PathButtonGroup({
           variant="outline"
           size="icon-sm"
           aria-label="Back"
+          disabled={disabled}
           onClick={() => {
             if (backPath) {
               onNavigate(backPath)
@@ -55,6 +58,7 @@ export function PathButtonGroup({
             variant="outline"
             size="sm"
             className="min-w-0 max-w-none"
+            disabled={disabled}
             key={part.path}
             title={part.label}
             onClick={() => onNavigate(part.path)}

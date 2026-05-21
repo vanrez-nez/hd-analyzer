@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core"
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener"
 import {
   checkFullDiskAccessPermission,
   requestFullDiskAccessPermission,
@@ -10,6 +9,7 @@ import { appLog } from "@/lib/logging"
 import type {
   DirectoryListingDto,
   DriveDto as FsDriveDto,
+  FsOpenProgressEvent,
   FsProgressEvent,
   InvalidationReceiptDto,
   ScanConfigDto,
@@ -64,6 +64,22 @@ export async function fsOpenPath(
   return invokeLogged<DirectoryListingDto>("fs_open_path", { path, volumeRoot, config })
 }
 
+export async function fsOpenPathWithProgress(
+  path: string,
+  volumeRoot: string,
+  config: ScanConfigDto | undefined,
+  onProgress: (event: FsOpenProgressEvent) => void,
+): Promise<DirectoryListingDto> {
+  const progressChannel = new Channel<FsOpenProgressEvent>()
+  progressChannel.onmessage = onProgress
+  return invokeLogged<DirectoryListingDto>("fs_open_path_with_progress", {
+    path,
+    volumeRoot,
+    config,
+    progressChannel,
+  })
+}
+
 export async function fsGetDirectory(
   path: string,
   volumeRoot: string,
@@ -106,7 +122,7 @@ export async function openItemLocation(paths: string[]): Promise<void> {
 
   await appLog.info("open item location started", { pathCount: revealPaths.length, paths: revealPaths })
   try {
-    await revealItemInDir(revealPaths.length === 1 ? revealPaths[0] : revealPaths)
+    await invokeLogged<void>("fs_reveal_items", { paths: revealPaths })
     await appLog.info("open item location completed", { pathCount: revealPaths.length })
   } catch (error) {
     await appLog.error("open item location failed", { error, pathCount: revealPaths.length, paths: revealPaths })
@@ -122,7 +138,7 @@ export async function previewItem(path: string): Promise<void> {
 
   await appLog.info("preview item started", { path: previewPath })
   try {
-    await openPath(previewPath)
+    await invokeLogged<void>("fs_preview_item", { path: previewPath })
     await appLog.info("preview item completed", { path: previewPath })
   } catch (error) {
     await appLog.error("preview item failed", { error, path: previewPath })

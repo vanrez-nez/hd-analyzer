@@ -37,11 +37,16 @@ type StatusItem = {
   totalSpace?: number
   availableSpace?: number
 }
+type ExplorerBusyOverlay = {
+  entriesProcessed: number
+  phase: "opening" | "scanning"
+}
 
 const ROW_ICON_CLASS = "size-3.5 shrink-0"
 const EXPLORER_ROW_SELECTOR = "[data-explorer-row]"
 
 type ExplorerTableProps = {
+  busyOverlay?: ExplorerBusyOverlay
   className?: string
   volumes: DriveDto[]
   listing?: DirectoryListingDto
@@ -55,6 +60,7 @@ type ExplorerTableProps = {
 }
 
 export function ExplorerTable({
+  busyOverlay,
   className,
   volumes,
   listing,
@@ -156,96 +162,116 @@ export function ExplorerTable({
   }
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border", className)}>
-      <Table className="block w-full">
-        <TableHeader className="block">
-          <TableRow className={tableRowClassName("hover:bg-transparent")}>
-            <SortableHead column="name" sort={sort} onSort={toggleSort} className="min-w-0">
-              Name
-            </SortableHead>
-            <SortableHead column="size" sort={sort} onSort={toggleSort} className="whitespace-nowrap text-right" align="right">
-              Size
-            </SortableHead>
-          </TableRow>
-        </TableHeader>
-      </Table>
-      <div
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none"
-        onClick={clearSelectionOnEmptyListClick}
-      >
+    <div
+      aria-busy={Boolean(busyOverlay)}
+      className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border", className)}
+    >
+      <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", busyOverlay && "opacity-[0.15]")}>
         <Table className="block w-full">
-          <TableBody className="block">
-            {!listing
-              ? (rows as DriveDto[]).map((volume) => {
-                  const selected = selectedItemSet.has(volume.id)
-
-                  return (
-                    <TableRow
-                      aria-selected={selected}
-                      className={selectableRowClassName("cursor-pointer select-none", selected)}
-                      data-explorer-row
-                      key={volume.id}
-                      ref={(element) => setRowElement(volume.id, element)}
-                      onClick={(event) => selectRow(volume.id, event)}
-                      onDoubleClick={() => onOpenVolume(volume)}
-                    >
-                      <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
-                        <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                          <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
-                          <span className="truncate" title={volume.label}>
-                            {volume.label}
-                          </span>
-                        </span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right">{formatBytes(volume.usedSpace)}</TableCell>
-                    </TableRow>
-                  )
-                })
-              : (rows as PathNodeDto[]).map((node) => {
-                  const selected = selectedItemSet.has(node.path)
-
-                  return (
-                    <TableRow
-                      aria-selected={selected}
-                      className={selectableRowClassName(
-                        node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
-                        selected,
-                      )}
-                      data-explorer-row
-                      key={node.path}
-                      ref={(element) => setRowElement(node.path, element)}
-                      title={node.deleteSafety?.reason}
-                      onClick={(event) => selectRow(node.path, event)}
-                      onDoubleClick={() => {
-                        if (node.kind === "directory") onOpenNode(node)
-                      }}
-                    >
-                      <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
-                        <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                          {node.kind === "directory" ? (
-                            <Folder
-                              data-icon="inline-start"
-                              className={cn(ROW_ICON_CLASS, safetyIconClass(node.deleteSafety?.classification))}
-                            />
-                          ) : (
-                            <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
-                          )}
-                          <span
-                            className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
-                            title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
-                          >
-                            {node.name}
-                          </span>
-                        </span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right">{renderNodeSize(node, loadingPath)}</TableCell>
-                    </TableRow>
-                  )
-                })}
-          </TableBody>
+          <TableHeader className="block">
+            <TableRow className={tableRowClassName("hover:bg-transparent")}>
+              <SortableHead column="name" sort={sort} onSort={toggleSort} className="min-w-0">
+                Name
+              </SortableHead>
+              <SortableHead column="size" sort={sort} onSort={toggleSort} className="whitespace-nowrap text-right" align="right">
+                Size
+              </SortableHead>
+            </TableRow>
+          </TableHeader>
         </Table>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none"
+          onClick={clearSelectionOnEmptyListClick}
+        >
+          <Table className="block w-full">
+            <TableBody className="block">
+              {!listing
+                ? (rows as DriveDto[]).map((volume) => {
+                    const selected = selectedItemSet.has(volume.id)
+
+                    return (
+                      <TableRow
+                        aria-selected={selected}
+                        className={selectableRowClassName("cursor-pointer select-none", selected)}
+                        data-explorer-row
+                        key={volume.id}
+                        ref={(element) => setRowElement(volume.id, element)}
+                        onClick={(event) => selectRow(volume.id, event)}
+                        onDoubleClick={() => onOpenVolume(volume)}
+                      >
+                        <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
+                          <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                            <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
+                            <span className="truncate" title={volume.label}>
+                              {volume.label}
+                            </span>
+                          </span>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-right">{formatBytes(volume.usedSpace)}</TableCell>
+                      </TableRow>
+                    )
+                  })
+                : (rows as PathNodeDto[]).map((node) => {
+                    const selected = selectedItemSet.has(node.path)
+
+                    return (
+                      <TableRow
+                        aria-selected={selected}
+                        className={selectableRowClassName(
+                          node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
+                          selected,
+                        )}
+                        data-explorer-row
+                        key={node.path}
+                        ref={(element) => setRowElement(node.path, element)}
+                        title={node.deleteSafety?.reason}
+                        onClick={(event) => selectRow(node.path, event)}
+                        onDoubleClick={() => {
+                          if (node.kind === "directory") onOpenNode(node)
+                        }}
+                      >
+                        <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
+                          <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                            {node.kind === "directory" ? (
+                              <Folder
+                                data-icon="inline-start"
+                                className={cn(ROW_ICON_CLASS, safetyIconClass(node.deleteSafety?.classification))}
+                              />
+                            ) : (
+                              <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
+                            )}
+                            <span
+                              className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
+                              title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
+                            >
+                              {node.name}
+                            </span>
+                          </span>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-right">{renderNodeSize(node, loadingPath)}</TableCell>
+                      </TableRow>
+                    )
+                  })}
+            </TableBody>
+          </Table>
+        </div>
+        <ExplorerStatusBar listing={listing} rows={statusItems} selectedRows={selectedStatusItems} />
       </div>
-      <ExplorerStatusBar listing={listing} rows={statusItems} selectedRows={selectedStatusItems} />
+      {busyOverlay ? <TableBusyOverlay overlay={busyOverlay} /> : null}
+    </div>
+  )
+}
+
+function TableBusyOverlay({ overlay }: { overlay: ExplorerBusyOverlay }) {
+  const phaseLabel = overlay.phase === "opening" ? "Opening" : "Scanning"
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center" aria-live="polite">
+      <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm shadow-sm">
+        <Spinner />
+        <span className="font-medium">{phaseLabel}</span>
+        <span className="text-muted-foreground">{formatCount(overlay.entriesProcessed, "item")} processed</span>
+      </div>
     </div>
   )
 }

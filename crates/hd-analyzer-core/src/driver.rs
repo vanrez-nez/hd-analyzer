@@ -339,13 +339,27 @@ impl LocalHdDriver {
         Self::default()
     }
 
-    fn discover_and_cache(
+    pub fn open_path_with_progress(
+        &self,
+        request: OpenPathRequest,
+        progress: Option<&crate::scan::DirectoryOpenProgressCallback<'_>>,
+    ) -> DriverResult<DirectoryListing> {
+        self.get_directory_with_open_progress(
+            &request.volume_root,
+            &request.path,
+            &request.config,
+            progress,
+        )
+    }
+
+    fn discover_and_cache_with_progress(
         &self,
         path: &Path,
         config: &ScanConfig,
+        progress: Option<&crate::scan::DirectoryOpenProgressCallback<'_>>,
     ) -> DriverResult<DirectoryListing> {
-        let mut listing =
-            crate::scan::discover_directory(path, config).map_err(|source| DriverError::Io {
+        let mut listing = crate::scan::discover_directory_with_progress(path, config, progress)
+            .map_err(|source| DriverError::Io {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -510,6 +524,32 @@ impl LocalHdDriver {
 
         summary_estimate.filter(|estimate| *estimate > 0)
     }
+
+    fn get_directory_with_open_progress(
+        &self,
+        volume_root: &Path,
+        path: &Path,
+        config: &ScanConfig,
+        progress: Option<&crate::scan::DirectoryOpenProgressCallback<'_>>,
+    ) -> DriverResult<DirectoryListing> {
+        let config = config.clone().normalized();
+        let scoped_path = self.scoped_existing_path(volume_root, path)?;
+        let fingerprint = config.fingerprint();
+        let cached_entry = {
+            self.cache
+                .lock()
+                .expect("directory cache poisoned")
+                .get(&scoped_path, &fingerprint)
+        };
+        if let Some(entry) = cached_entry {
+            if entry.freshness != CacheFreshness::Stale {
+                let mut listing = entry.listing;
+                self.enrich_listing_from_cached_summaries(&mut listing);
+                return Ok(listing);
+            }
+        }
+        self.discover_and_cache_with_progress(&scoped_path, &config, progress)
+    }
 }
 
 impl HdDriver for LocalHdDriver {
@@ -529,23 +569,7 @@ impl HdDriver for LocalHdDriver {
         path: &Path,
         config: &ScanConfig,
     ) -> DriverResult<DirectoryListing> {
-        let config = config.clone().normalized();
-        let scoped_path = self.scoped_existing_path(volume_root, path)?;
-        let fingerprint = config.fingerprint();
-        let cached_entry = {
-            self.cache
-                .lock()
-                .expect("directory cache poisoned")
-                .get(&scoped_path, &fingerprint)
-        };
-        if let Some(entry) = cached_entry {
-            if entry.freshness != CacheFreshness::Stale {
-                let mut listing = entry.listing;
-                self.enrich_listing_from_cached_summaries(&mut listing);
-                return Ok(listing);
-            }
-        }
-        self.discover_and_cache(&scoped_path, &config)
+        self.get_directory_with_open_progress(volume_root, path, config, None)
     }
 
     fn start_scan(

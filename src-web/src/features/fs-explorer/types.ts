@@ -98,6 +98,11 @@ export type DirectoryListingDto = {
   generation: number
 }
 
+export type FsOpenProgressEvent = {
+  path: string
+  entriesProcessed: number
+}
+
 export type ProgressSnapshotDto = {
   jobId: string
   requestId: string

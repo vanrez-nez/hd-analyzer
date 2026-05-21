@@ -18,3 +18,4 @@ pub use drives::{Drive, list_drives};
 pub use jobs::{JobState, ProgressSnapshot};
 pub use paths::{compact_path, format_bytes, format_ratio};
 pub use rules::{LiveUpdateConfig, ScanConfig, SizeMeasurementMode};
+pub use scan::{DirectoryOpenProgress, DirectoryOpenProgressCallback};

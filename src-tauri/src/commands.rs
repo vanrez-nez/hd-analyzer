@@ -3,12 +3,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hd_analyzer_core::{HdDriver, OpenPathRequest, StartScanRequest};
-use tauri::{State, ipc::Channel};
+use tauri::{AppHandle, State, ipc::Channel};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::dto::{
-    CommandError, CommandErrorCode, DirectoryListingDto, DriveDto, FsProgressEventDto,
-    InvalidationReceiptDto, InvalidationScopeDto, PermissionCheckDto, ScanConfigDto,
-    StartScanReceiptDto,
+    CommandError, CommandErrorCode, DirectoryListingDto, DriveDto, FsOpenProgressEventDto,
+    FsProgressEventDto, InvalidationReceiptDto, InvalidationScopeDto, PermissionCheckDto,
+    ScanConfigDto, StartScanReceiptDto,
 };
 use crate::state::AppState;
 
@@ -66,6 +67,54 @@ pub fn fs_open_path(
         }
         Err(error) => {
             log::warn!("failed to open filesystem path: {error}");
+            Err(command_error(error))
+        }
+    }
+}
+
+#[tauri::command]
+pub fn fs_open_path_with_progress(
+    path: String,
+    volume_root: String,
+    config: Option<ScanConfigDto>,
+    progress_channel: Channel<FsOpenProgressEventDto>,
+    state: State<'_, AppState>,
+) -> Result<DirectoryListingDto, CommandError> {
+    let volume_root = PathBuf::from(volume_root);
+    let path = PathBuf::from(path);
+    log::info!(
+        "opening filesystem path {} inside volume {} with progress",
+        path.display(),
+        volume_root.display()
+    );
+
+    let progress_path = path.display().to_string();
+    let channel = progress_channel.clone();
+    let progress_callback = move |progress: hd_analyzer_core::DirectoryOpenProgress| {
+        let _ = channel.send(FsOpenProgressEventDto::new(progress_path.clone(), progress));
+    };
+    let request = OpenPathRequest {
+        volume_root,
+        path,
+        config: config.unwrap_or_default().into(),
+        request_id: chrono_like_timestamp(),
+    };
+    match state
+        .fs_driver
+        .open_path_with_progress(request, Some(&progress_callback))
+    {
+        Ok(listing) => {
+            log::info!(
+                "opened filesystem path {} with {} child node(s), total measured size {}, total logical size {}",
+                listing.path.display(),
+                listing.children.len(),
+                listing.total_measured_size,
+                listing.total_logical_size
+            );
+            Ok(DirectoryListingDto::from(&listing))
+        }
+        Err(error) => {
+            log::warn!("failed to open filesystem path with progress: {error}");
             Err(command_error(error))
         }
     }
@@ -197,6 +246,45 @@ pub fn fs_invalidate_path(
 }
 
 #[tauri::command]
+pub fn fs_reveal_items(paths: Vec<String>, app: AppHandle) -> Result<(), CommandError> {
+    let paths = paths
+        .iter()
+        .filter(|path| !path.trim().is_empty())
+        .map(|path| existing_absolute_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    log::info!("revealing {} filesystem item(s)", paths.len());
+    app.opener().reveal_items_in_dir(&paths).map_err(|error| {
+        log::warn!("failed to reveal filesystem item(s): {error}");
+        CommandError::new(
+            CommandErrorCode::OpenItemFailed,
+            format!("Failed to reveal selected item(s): {error}"),
+        )
+    })
+}
+
+#[tauri::command]
+pub fn fs_preview_item(path: String, app: AppHandle) -> Result<(), CommandError> {
+    let path = existing_absolute_path(&path)?;
+    log::info!("previewing filesystem item {}", path.display());
+    app.opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|error| {
+            log::warn!(
+                "failed to preview filesystem item {}: {error}",
+                path.display()
+            );
+            CommandError::new(
+                CommandErrorCode::OpenItemFailed,
+                format!("Failed to preview {}: {error}", path.display()),
+            )
+        })
+}
+
+#[tauri::command]
 pub fn check_permissions(root: Option<String>) -> PermissionCheckDto {
     let Some(root) = root.filter(|value| !value.trim().is_empty()) else {
         log::warn!("permission check requested without a selected volume");
@@ -233,6 +321,31 @@ pub fn check_permissions(root: Option<String>) -> PermissionCheckDto {
             }
         }
     }
+}
+
+fn existing_absolute_path(path: &str) -> Result<PathBuf, CommandError> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(CommandError::new(
+            CommandErrorCode::InvalidRoot,
+            "Path cannot be empty.",
+        ));
+    }
+
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(CommandError::new(
+            CommandErrorCode::InvalidRoot,
+            format!("Path must be absolute: {}", path.display()),
+        ));
+    }
+
+    path.canonicalize().map_err(|error| {
+        CommandError::new(
+            CommandErrorCode::OpenItemFailed,
+            format!("Cannot access {}: {error}", path.display()),
+        )
+    })
 }
 
 fn chrono_like_timestamp() -> String {

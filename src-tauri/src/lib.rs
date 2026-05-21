@@ -4,7 +4,7 @@ mod state;
 
 use commands::{
     check_permissions, fs_cancel_job, fs_get_directory, fs_invalidate_path, fs_list_volumes,
-    fs_open_path, fs_start_scan,
+    fs_open_path, fs_open_path_with_progress, fs_preview_item, fs_reveal_items, fs_start_scan,
 };
 use state::AppState;
 use tauri_plugin_log::{Target, TargetKind};
@@ -34,10 +34,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fs_list_volumes,
             fs_open_path,
+            fs_open_path_with_progress,
             fs_get_directory,
             fs_start_scan,
             fs_cancel_job,
             fs_invalidate_path,
+            fs_reveal_items,
+            fs_preview_item,
             check_permissions
         ])
         .run(tauri::generate_context!())
