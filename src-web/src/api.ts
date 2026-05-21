@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
-import { revealItemInDir } from "@tauri-apps/plugin-opener"
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener"
 import {
   checkFullDiskAccessPermission,
   requestFullDiskAccessPermission,
@@ -167,6 +167,22 @@ export async function openItemLocation(paths: string[]): Promise<void> {
     await appLog.info("open item location completed", { pathCount: revealPaths.length })
   } catch (error) {
     await appLog.error("open item location failed", { error, pathCount: revealPaths.length, paths: revealPaths })
+    throw error
+  }
+}
+
+export async function previewItem(path: string): Promise<void> {
+  const previewPath = path.trim()
+  if (previewPath.length === 0) {
+    return
+  }
+
+  await appLog.info("preview item started", { path: previewPath })
+  try {
+    await openPath(previewPath)
+    await appLog.info("preview item completed", { path: previewPath })
+  } catch (error) {
+    await appLog.error("preview item failed", { error, path: previewPath })
     throw error
   }
 }

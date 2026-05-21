@@ -8,6 +8,7 @@
     "log:default",
     "macos-permissions:allow-check-full-disk-access-permission",
     "macos-permissions:allow-request-full-disk-access-permission",
+    "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir"
   ]
 }

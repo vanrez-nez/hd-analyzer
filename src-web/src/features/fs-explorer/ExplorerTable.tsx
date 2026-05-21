@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { openItemLocation } from "@/api"
+import { openItemLocation, previewItem } from "@/api"
 import { isToggleSelectionInput, rangeSelection, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
 import type { DeleteSafetyClassification, DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
@@ -292,8 +292,16 @@ function ExplorerStatusBar({
   const fileCount = rows.filter((row) => row.kind === "file").length
   const totalSelectedSize = selectedRows.reduce((total, row) => total + row.size, 0)
   const canDeleteSelection = selectedRows.every((row) => row.canDeleteNow !== false)
+  const canPreviewSelection = selectedRows.length === 1 && selected?.kind === "file"
   const handleOpenLocation = () => {
     void openItemLocation(selectedRows.map((row) => row.path)).catch(() => undefined)
+  }
+  const handlePreview = () => {
+    if (!selected || selected.kind !== "file") {
+      return
+    }
+
+    void previewItem(selected.path).catch(() => undefined)
   }
 
   return (
@@ -321,7 +329,14 @@ function ExplorerStatusBar({
             <FolderOpenIcon data-icon="inline-start" />
           </Button>
           {selectedRows.length === 1 ? (
-            <Button type="button" variant="ghost" size="icon-sm" aria-label="Preview selected item" onClick={noopAction}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Preview selected item"
+              disabled={!canPreviewSelection}
+              onClick={handlePreview}
+            >
               <EyeIcon data-icon="inline-start" />
             </Button>
           ) : null}
