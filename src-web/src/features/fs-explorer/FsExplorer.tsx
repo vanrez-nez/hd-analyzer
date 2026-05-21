@@ -4,7 +4,9 @@ import { PanelRightOpenIcon, RefreshCwIcon, ShieldCheck } from "lucide-react"
 import { deleteItems, fsInvalidatePath, fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ExplorerTable } from "./ExplorerTable"
+import type { ExplorerLoadingOverlayProps } from "./ExplorerLoadingOverlay"
 import { PathButtonGroup } from "./PathButtonGroup"
 import { VolumeDetails } from "./VolumeDetails"
 import { createExplorerCache, getCachedListing, markPathStale, putCachedListing } from "./cache"
@@ -26,10 +28,20 @@ type PendingNavigation = {
   path: string
   phase: "opening" | "scanning"
 }
+type PendingNavigationUpdate =
+  | PendingNavigation
+  | undefined
+  | ((pending: PendingNavigation | undefined) => PendingNavigation | undefined)
 type ScanProgressState = {
   path: string
   snapshot: ProgressSnapshotDto
 }
+type CompletionOverlay = ExplorerLoadingOverlayProps & {
+  path: string
+}
+type ProgressOverlayMode = "completed" | "determinate" | "indeterminate"
+
+const SCAN_COMPLETION_OVERLAY_MS = 300
 
 type FsExplorerProps = {
   explorerSelectionAnchorId: string | null
@@ -63,10 +75,14 @@ export function FsExplorer({
   const [loadingPath, setLoadingPath] = useState<string>()
   const [isReloadingVolumes, setIsReloadingVolumes] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>()
+  const [completionOverlay, setCompletionOverlay] = useState<CompletionOverlay>()
   const [scanProgress, setScanProgress] = useState<ScanProgressState>()
   const [liveUpdates, setLiveUpdates] = useState<LiveDirectoryUpdates>({})
   const [error, setError] = useState<string>()
   const activeScansRef = useRef<Set<string>>(new Set())
+  const completionOverlayTimeoutRef = useRef<number | undefined>(undefined)
+  const pendingNavigationRef = useRef<PendingNavigation | undefined>(undefined)
+  const scanProgressByPathRef = useRef<Map<string, ProgressSnapshotDto>>(new Map())
   const scanJobPathRef = useRef<Map<string, string>>(new Map())
   const navigationRequestRef = useRef(0)
 
@@ -77,22 +93,22 @@ export function FsExplorer({
   const listingLiveUpdates = listing ? liveUpdates[listing.path] : undefined
   const visualizerLiveUpdates = visualizerOpen ? listingLiveUpdates : undefined
   const canReloadCurrentPath = Boolean(selectedVolume && currentPath)
-  const isNavigationPending = Boolean(pendingNavigation)
+  const isNavigationPending = Boolean(pendingNavigation || completionOverlay)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
   const isVolumesLevel = !currentPath
   const reloadDisabled = isVolumesLevel ? isReloadingVolumes : isReloadingCurrentPath || isNavigationPending
-  const busyOverlay = useMemo(
-    () =>
-      pendingNavigation
-        ? {
-            ...pendingNavigation,
-            infinite: true,
-            operationKey: `${pendingNavigation.phase}:${pendingNavigation.path}`,
-            ...progressSnapshotToOverlayProps(scanProgress, pendingNavigation.path),
-          }
-        : undefined,
-    [pendingNavigation, scanProgress],
-  )
+  const busyOverlay = useMemo(() => {
+    if (!pendingNavigation) {
+      return completionOverlay
+    }
+
+    return {
+      ...pendingNavigation,
+      infinite: true,
+      operationKey: `${pendingNavigation.phase}:${pendingNavigation.path}`,
+      ...progressSnapshotToOverlayProps(scanProgress, pendingNavigation.path),
+    }
+  }, [completionOverlay, pendingNavigation, scanProgress])
 
   const refreshVolumes = useCallback(async () => {
     const nextVolumes = await fsListVolumes()
@@ -106,9 +122,61 @@ export function FsExplorer({
     })
   }, [])
 
+  const clearCompletionOverlay = useCallback(() => {
+    if (completionOverlayTimeoutRef.current !== undefined) {
+      window.clearTimeout(completionOverlayTimeoutRef.current)
+      completionOverlayTimeoutRef.current = undefined
+    }
+    setCompletionOverlay(undefined)
+  }, [])
+
+  const setPendingNavigationState = useCallback((update: PendingNavigationUpdate) => {
+    setPendingNavigation((current) => {
+      const next = typeof update === "function" ? update(current) : update
+      pendingNavigationRef.current = next
+      return next
+    })
+  }, [])
+
+  const showCompletionOverlay = useCallback((path: string, jobId: string, requestId: string) => {
+    if (completionOverlayTimeoutRef.current !== undefined) {
+      window.clearTimeout(completionOverlayTimeoutRef.current)
+    }
+
+    const snapshot = scanProgressByPathRef.current.get(path)
+    const operationKey = `completed:${path}:${jobId}:${requestId}`
+    setCompletionOverlay({
+      entriesProcessed: snapshot?.completedUnits ?? 0,
+      forceVisible: true,
+      infinite: false,
+      operationKey,
+      path,
+      phase: "scanning",
+      progress: 100,
+    })
+
+    completionOverlayTimeoutRef.current = window.setTimeout(() => {
+      setCompletionOverlay((overlay) => (overlay?.operationKey === operationKey ? undefined : overlay))
+      completionOverlayTimeoutRef.current = undefined
+    }, SCAN_COMPLETION_OVERLAY_MS)
+  }, [])
+
   useEffect(() => {
     refreshVolumes().catch((error: unknown) => setError(error instanceof Error ? error.message : String(error)))
   }, [currentPath, refreshVolumes])
+
+  useEffect(() => {
+    pendingNavigationRef.current = pendingNavigation
+  }, [pendingNavigation])
+
+  useEffect(
+    () => () => {
+      if (completionOverlayTimeoutRef.current !== undefined) {
+        window.clearTimeout(completionOverlayTimeoutRef.current)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!onVisualizerSnapshotChange) {
@@ -161,9 +229,10 @@ export function FsExplorer({
       if (event.event === "progressSnapshot") {
         const progressPath = scanJobPathRef.current.get(progressEventKey(event.data.jobId, event.data.requestId))
         if (progressPath) {
+          scanProgressByPathRef.current.set(progressPath, event.data.snapshot)
           setScanProgress({ path: progressPath, snapshot: event.data.snapshot })
         }
-        setPendingNavigation((pending) =>
+        setPendingNavigationState((pending) =>
           pending && progressPath === pending.path
             ? { ...pending, entriesProcessed: event.data.snapshot.completedUnits, phase: "scanning" }
             : pending,
@@ -171,8 +240,9 @@ export function FsExplorer({
       }
       if (event.event === "directoryProgress") {
         scanJobPathRef.current.set(progressEventKey(event.data.jobId, event.data.requestId), event.data.path)
+        scanProgressByPathRef.current.set(event.data.path, event.data.snapshot)
         setScanProgress({ path: event.data.path, snapshot: event.data.snapshot })
-        setPendingNavigation((pending) =>
+        setPendingNavigationState((pending) =>
           pending && event.data.path === pending.path
             ? { ...pending, entriesProcessed: event.data.snapshot.completedUnits, phase: "scanning" }
             : pending,
@@ -188,9 +258,13 @@ export function FsExplorer({
       if (event.event === "jobFinished" || event.event === "jobFailed") {
         scanJobPathRef.current.delete(progressEventKey(event.data.jobId, event.data.requestId))
         activeScansRef.current.delete(scanKey(event.data.path))
+        if (event.event === "jobFinished" && pendingNavigationRef.current?.path === event.data.path) {
+          showCompletionOverlay(event.data.path, event.data.jobId, event.data.requestId)
+        }
         setLoadingPath((loadingPath) => (loadingPath === event.data.path ? undefined : loadingPath))
         setScanProgress((progress) => (progress?.path === event.data.path ? undefined : progress))
-        setPendingNavigation((pending) => (pending?.path === event.data.path ? undefined : pending))
+        setPendingNavigationState((pending) => (pending?.path === event.data.path ? undefined : pending))
+        scanProgressByPathRef.current.delete(event.data.path)
         setLiveUpdates((updates) => {
           if (!updates[event.data.path]) {
             return updates
@@ -201,7 +275,7 @@ export function FsExplorer({
         })
       }
     },
-    [mergeListing],
+    [mergeListing, setPendingNavigationState, showCompletionOverlay],
   )
 
   const startScan = useCallback(
@@ -212,33 +286,37 @@ export function FsExplorer({
       }
 
       activeScansRef.current.add(key)
+      clearCompletionOverlay()
+      const initialSnapshot = {
+        jobId: "",
+        requestId: "",
+        state: "queued",
+        estimatedTotalBytes: null,
+        scheduledUnits: 0,
+        discoveredUnits: 0,
+        completedUnits: 0,
+        activeUnits: 0,
+        skippedUnits: 0,
+        failedUnits: 0,
+        canceledUnits: 0,
+        bytesMeasured: 0,
+        activePaths: [path],
+      } satisfies ProgressSnapshotDto
+      scanProgressByPathRef.current.set(path, initialSnapshot)
       setScanProgress({
         path,
-        snapshot: {
-          jobId: "",
-          requestId: "",
-          state: "queued",
-          estimatedTotalBytes: null,
-          scheduledUnits: 0,
-          discoveredUnits: 0,
-          completedUnits: 0,
-          activeUnits: 0,
-          skippedUnits: 0,
-          failedUnits: 0,
-          canceledUnits: 0,
-          bytesMeasured: 0,
-          activePaths: [path],
-        },
+        snapshot: initialSnapshot,
       })
       try {
         await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress, replaceExisting)
         return true
       } catch (error) {
         activeScansRef.current.delete(key)
+        scanProgressByPathRef.current.delete(path)
         throw error
       }
     },
-    [handleProgress],
+    [clearCompletionOverlay, handleProgress],
   )
 
   const openPath = useCallback(
@@ -246,12 +324,13 @@ export function FsExplorer({
       if (!volume) {
         return
       }
+      clearCompletionOverlay()
       const volumeRoot = volume.mountPoint
       const cached = getCachedListing(cache, path)
       if (cached && !forceRefresh) {
         navigationRequestRef.current += 1
         setCurrentPath(cached.path)
-        setPendingNavigation(undefined)
+        setPendingNavigationState(undefined)
         setLoadingPath(undefined)
         setError(undefined)
         return
@@ -261,14 +340,14 @@ export function FsExplorer({
       navigationRequestRef.current = requestId
       setError(undefined)
       setLoadingPath(path)
-      setPendingNavigation({ entriesProcessed: 0, path, phase: "opening" })
+      setPendingNavigationState({ entriesProcessed: 0, path, phase: "opening" })
       try {
         const listing = await fsOpenPathWithProgress(path, volumeRoot, defaultScanConfig, (progress) => {
           if (navigationRequestRef.current !== requestId) {
             return
           }
 
-          setPendingNavigation((pending) =>
+          setPendingNavigationState((pending) =>
             pending?.path === path
               ? { ...pending, entriesProcessed: progress.entriesProcessed, phase: "opening" }
               : pending,
@@ -282,14 +361,14 @@ export function FsExplorer({
         setCurrentPath(listing.path)
         if (listingNeedsScan(listing)) {
           setLoadingPath(listing.path)
-          setPendingNavigation({ entriesProcessed: 0, path: listing.path, phase: "scanning" })
+          setPendingNavigationState({ entriesProcessed: 0, path: listing.path, phase: "scanning" })
           const started = await startScan(listing.path, volumeRoot)
           if (!started) {
-            setPendingNavigation(undefined)
+            setPendingNavigationState(undefined)
             setLoadingPath(undefined)
           }
         } else {
-          setPendingNavigation(undefined)
+          setPendingNavigationState(undefined)
           setLoadingPath(undefined)
         }
       } catch (error) {
@@ -298,11 +377,11 @@ export function FsExplorer({
         }
 
         setError(error instanceof Error ? error.message : String(error))
-        setPendingNavigation(undefined)
+        setPendingNavigationState(undefined)
         setLoadingPath(undefined)
       }
     },
-    [cache, mergeListing, selectedVolume, startScan],
+    [cache, clearCompletionOverlay, mergeListing, selectedVolume, setPendingNavigationState, startScan],
   )
 
   const deleteExplorerItems = useCallback(
@@ -348,22 +427,23 @@ export function FsExplorer({
 
     setError(undefined)
     setLoadingPath(currentPath)
-    setPendingNavigation({ entriesProcessed: 0, path: currentPath, phase: "scanning" })
+    setPendingNavigationState({ entriesProcessed: 0, path: currentPath, phase: "scanning" })
     try {
       const started = await startScan(currentPath, selectedVolume.mountPoint, true)
       if (!started) {
-        setPendingNavigation(undefined)
+        setPendingNavigationState(undefined)
         setLoadingPath(undefined)
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
-      setPendingNavigation(undefined)
+      setPendingNavigationState(undefined)
       setLoadingPath(undefined)
     }
-  }, [currentPath, selectedVolume, startScan])
+  }, [currentPath, selectedVolume, setPendingNavigationState, startScan])
 
   const reloadVolumes = useCallback(async () => {
     setError(undefined)
+    clearCompletionOverlay()
     setIsReloadingVolumes(true)
     try {
       await refreshVolumes()
@@ -372,14 +452,15 @@ export function FsExplorer({
     } finally {
       setIsReloadingVolumes(false)
     }
-  }, [refreshVolumes])
+  }, [clearCompletionOverlay, refreshVolumes])
 
   const returnToVolumes = () => {
     navigationRequestRef.current += 1
+    clearCompletionOverlay()
     setSelectedVolume(undefined)
     setCurrentPath(undefined)
     setLoadingPath(undefined)
-    setPendingNavigation(undefined)
+    setPendingNavigationState(undefined)
     setError(undefined)
   }
 
@@ -407,30 +488,46 @@ export function FsExplorer({
             onBackToRoot={returnToVolumes}
           />
         </div>
-        <ButtonGroup>
-          {isVolumesLevel || canReloadCurrentPath ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              aria-label={isVolumesLevel ? "Reload volumes" : "Reload current path"}
-              disabled={reloadDisabled}
-              onClick={() => void (isVolumesLevel ? reloadVolumes() : reloadCurrentPath())}
-            >
-              <RefreshCwIcon data-icon="inline-start" />
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant={visualizerOpen ? "secondary" : "outline"}
-            size="icon-sm"
-            aria-label={visualizerOpen ? "Hide visualizer" : "Show visualizer"}
-            aria-pressed={visualizerOpen}
-            onClick={onVisualizerToggle}
-          >
-            <PanelRightOpenIcon data-icon="inline-start" />
-          </Button>
-        </ButtonGroup>
+        <TooltipProvider delayDuration={250}>
+          <ButtonGroup>
+            {isVolumesLevel || canReloadCurrentPath ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label={isVolumesLevel ? "Reload volumes" : "Reload current path"}
+                    disabled={reloadDisabled}
+                    onClick={() => void (isVolumesLevel ? reloadVolumes() : reloadCurrentPath())}
+                  >
+                    <RefreshCwIcon data-icon="inline-start" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {isVolumesLevel ? "Reload volumes" : "Reload current path"}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant={visualizerOpen ? "secondary" : "outline"}
+                  size="icon-sm"
+                  aria-label={visualizerOpen ? "Hide visualizer" : "Show visualizer"}
+                  aria-pressed={visualizerOpen}
+                  onClick={onVisualizerToggle}
+                >
+                  <PanelRightOpenIcon data-icon="inline-start" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {visualizerOpen ? "Hide visualizer" : "Show visualizer"}
+              </TooltipContent>
+            </Tooltip>
+          </ButtonGroup>
+        </TooltipProvider>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <ExplorerTable
@@ -553,18 +650,34 @@ function progressSnapshotToOverlayProps(progress: ScanProgressState | undefined,
   }
 
   const { snapshot } = progress
-  const totalBytes = snapshot.estimatedTotalBytes ?? 0
-  const hasEstimate = totalBytes > 0
-  if (!hasEstimate) {
+  const mode = progressOverlayMode(snapshot)
+  if (mode === "completed") {
+    return {
+      infinite: false,
+      progress: 100,
+    }
+  }
+
+  if (mode === "indeterminate") {
     return {
       infinite: true,
     }
   }
 
-  const percent = Math.min(snapshot.state === "completed" ? 100 : 99, (snapshot.bytesMeasured / totalBytes) * 100)
+  const totalBytes = snapshot.estimatedTotalBytes ?? 0
+  const percent = Math.min(99, (snapshot.bytesMeasured / totalBytes) * 100)
 
   return {
     infinite: false,
     progress: percent,
   }
+}
+
+function progressOverlayMode(snapshot: ProgressSnapshotDto): ProgressOverlayMode {
+  if (snapshot.state === "completed") {
+    return "completed"
+  }
+
+  const totalBytes = snapshot.estimatedTotalBytes ?? 0
+  return totalBytes > 0 && snapshot.bytesMeasured <= totalBytes ? "determinate" : "indeterminate"
 }

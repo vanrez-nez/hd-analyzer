@@ -511,11 +511,8 @@ impl LocalHdDriver {
         config: &ScanConfig,
     ) -> Option<u64> {
         let canonical_root = canonicalize_volume_root(volume_root).ok()?;
-        if path == canonical_root {
-            return drives::list_drives().ok()?.into_iter().find_map(|drive| {
-                let drive_root = drive.mount_point.canonicalize().ok()?;
-                (drive_root == canonical_root).then(|| drive.used_space())
-            });
+        if let Some(used_space) = estimate_volume_root_used_space(&canonical_root, path) {
+            return Some(used_space);
         }
 
         let fingerprint = config.fingerprint();
@@ -817,6 +814,45 @@ fn nanos_to_seconds(nanos: u64) -> f64 {
     nanos as f64 / 1_000_000_000.0
 }
 
+fn estimate_volume_root_used_space(canonical_root: &Path, path: &Path) -> Option<u64> {
+    if !equivalent_paths(path, canonical_root) {
+        return None;
+    }
+
+    drives::list_drives()
+        .ok()?
+        .into_iter()
+        .find_map(|drive| {
+            if drive_mount_matches_root(&drive.mount_point, canonical_root) {
+                Some(drive.used_space())
+            } else {
+                None
+            }
+        })
+        .filter(|used_space| *used_space > 0)
+}
+
+fn drive_mount_matches_root(mount_point: &Path, canonical_root: &Path) -> bool {
+    mount_point
+        .canonicalize()
+        .is_ok_and(|drive_root| equivalent_paths(&drive_root, canonical_root))
+        || equivalent_paths(mount_point, canonical_root)
+}
+
+fn equivalent_paths(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+
+    match (
+        normalize_path_lexically(left),
+        normalize_path_lexically(right),
+    ) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
 fn canonicalize_volume_root(volume_root: &Path) -> DriverResult<PathBuf> {
     volume_root
         .canonicalize()
@@ -937,6 +973,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(listing.path, child.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn equivalent_paths_accepts_lexically_equal_paths() {
+        let left = Path::new("volume").join("folder").join("..").join("root");
+        let right = Path::new("volume").join("root");
+
+        assert!(equivalent_paths(&left, &right));
     }
 
     #[test]

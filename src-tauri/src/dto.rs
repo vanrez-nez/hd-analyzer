@@ -289,7 +289,12 @@ impl From<InvalidationScopeDto> for InvalidationScope {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "event",
+    content = "data"
+)]
 pub enum FsProgressEventDto {
     JobQueued {
         job_id: String,
@@ -516,6 +521,9 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
 
         assert!(json.contains("jobQueued"));
+        assert!(json.contains("jobId"));
+        assert!(json.contains("requestId"));
+        assert!(!json.contains("job_id"));
     }
 
     #[test]

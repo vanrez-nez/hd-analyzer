@@ -4,6 +4,7 @@ export type ExplorerLoadingPhase = "opening" | "scanning"
 
 export type ExplorerLoadingOverlayProps = {
   entriesProcessed: number
+  forceVisible?: boolean
   infinite?: boolean
   operationKey: string
   phase: ExplorerLoadingPhase
@@ -19,6 +20,7 @@ const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RING_RADIUS
 
 export function ExplorerLoadingOverlay({
   entriesProcessed,
+  forceVisible = false,
   infinite = true,
   operationKey,
   phase,
@@ -31,6 +33,11 @@ export function ExplorerLoadingOverlay({
   const progressDashOffset = PROGRESS_RING_CIRCUMFERENCE - (clampedProgress / 100) * PROGRESS_RING_CIRCUMFERENCE
 
   useEffect(() => {
+    if (forceVisible) {
+      setIsVisible(true)
+      return
+    }
+
     setIsVisible(false)
 
     const timeoutId = window.setTimeout(() => {
@@ -40,7 +47,7 @@ export function ExplorerLoadingOverlay({
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [operationKey])
+  }, [forceVisible, operationKey])
 
   if (!isVisible) {
     return null
