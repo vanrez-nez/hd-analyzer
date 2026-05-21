@@ -74,7 +74,7 @@ export function Visualizer({
     <div ref={wrapperRef} className="relative h-full w-full overflow-hidden">
       <canvas
         ref={canvasRef}
-        className="absolute left-1/2 top-1/2 block -translate-x-1/2 -translate-y-1/2 p-16"
+        className="absolute block box-border p-16"
         aria-label="Visualizer canvas"
         onClick={(event) => {
           const cell = selectedCellAtPoint(
@@ -115,8 +115,8 @@ function drawVisualizer(
     return false
   }
 
-  const { context, devicePixelRatio, layout, voronoi } = renderState
-  context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+  const { context, layout, scaleX, scaleY, voronoi } = renderState
+  context.setTransform(scaleX, 0, 0, scaleY, 0, 0)
   voronoi.drawBackground(context)
   // voronoi.drawDebugBase(context, layout)
   honeycomb.draw(context, layout, { colorScheme, selectedItemIds })
@@ -135,13 +135,12 @@ function prepareVisualizer(
     return undefined
   }
 
-  const width = Math.max(1, Math.floor(wrapper.clientWidth))
-  const height = Math.max(1, Math.floor(wrapper.clientHeight))
+  const { paddingLeft, paddingTop, width, height } = getCanvasContentMetrics(canvas, wrapper)
   const devicePixelRatio = window.devicePixelRatio || 1
-  const backingWidth = Math.floor(width * devicePixelRatio)
-  const backingHeight = Math.floor(height * devicePixelRatio)
-  canvas.style.width = `${width}px`
-  canvas.style.height = `${height}px`
+  const backingWidth = Math.max(1, Math.round(width * devicePixelRatio))
+  const backingHeight = Math.max(1, Math.round(height * devicePixelRatio))
+  const scaleX = backingWidth / width
+  const scaleY = backingHeight / height
 
   if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
     canvas.width = backingWidth
@@ -160,6 +159,10 @@ function prepareVisualizer(
     context,
     devicePixelRatio,
     layout,
+    paddingLeft,
+    paddingTop,
+    scaleX,
+    scaleY,
     voronoi: voronoiRef.current,
   }
 }
@@ -177,7 +180,7 @@ function selectedCellAtPoint(
     return undefined
   }
 
-  const point = canvasPointFromEvent(event, canvas)
+  const point = canvasPointFromEvent(event, canvas, renderState.paddingLeft, renderState.paddingTop)
   return honeycomb.hitTest(renderState.layout, point, { colorScheme })
 }
 
@@ -203,7 +206,42 @@ function selectionForCellClick(
   return replaceSelection(memberIds)
 }
 
-function canvasPointFromEvent(event: MouseEvent<HTMLCanvasElement>, canvas: HTMLCanvasElement) {
+function getCanvasContentMetrics(canvas: HTMLCanvasElement, wrapper: HTMLDivElement) {
+  const canvasSize = Math.max(1, Math.floor(Math.min(wrapper.clientWidth, wrapper.clientHeight)))
+  const canvasLeft = Math.max(0, Math.floor((wrapper.clientWidth - canvasSize) / 2))
+  const canvasTop = Math.max(0, Math.floor((wrapper.clientHeight - canvasSize) / 2))
+  canvas.style.left = `${canvasLeft}px`
+  canvas.style.top = `${canvasTop}px`
+  canvas.style.width = `${canvasSize}px`
+  canvas.style.height = `${canvasSize}px`
+
+  const style = window.getComputedStyle(canvas)
+  const paddingLeft = parseCssPixels(style.paddingLeft)
+  const paddingRight = parseCssPixels(style.paddingRight)
+  const paddingTop = parseCssPixels(style.paddingTop)
+  const paddingBottom = parseCssPixels(style.paddingBottom)
+  const width = Math.max(1, canvasSize - Math.ceil(paddingLeft + paddingRight))
+  const height = Math.max(1, canvasSize - Math.ceil(paddingTop + paddingBottom))
+
+  return {
+    paddingLeft,
+    paddingTop,
+    width,
+    height,
+  }
+}
+
+function parseCssPixels(value: string) {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function canvasPointFromEvent(
+  event: MouseEvent<HTMLCanvasElement>,
+  canvas: HTMLCanvasElement,
+  paddingLeft: number,
+  paddingTop: number,
+) {
   const rect = canvas.getBoundingClientRect()
-  return [event.clientX - rect.left, event.clientY - rect.top] as [number, number]
+  return [event.clientX - rect.left - paddingLeft, event.clientY - rect.top - paddingTop] as [number, number]
 }
