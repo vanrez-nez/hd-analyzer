@@ -4,7 +4,6 @@ import { PanelRightOpenIcon, RefreshCwIcon, ShieldCheck } from "lucide-react"
 import { fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import { ExplorerTable } from "./ExplorerTable"
 import { PathButtonGroup } from "./PathButtonGroup"
 import { createExplorerCache, getCachedListing, putCachedListing } from "./cache"
@@ -25,6 +24,10 @@ type PendingNavigation = {
   entriesProcessed: number
   path: string
   phase: "opening" | "scanning"
+}
+type ScanProgressState = {
+  path: string
+  snapshot: ProgressSnapshotDto
 }
 
 type FsExplorerProps = {
@@ -58,10 +61,11 @@ export function FsExplorer({
   const [cache, setCache] = useState<ExplorerCache>(() => createExplorerCache())
   const [loadingPath, setLoadingPath] = useState<string>()
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>()
-  const [scanProgress, setScanProgress] = useState<ProgressSnapshotDto>()
+  const [scanProgress, setScanProgress] = useState<ScanProgressState>()
   const [liveUpdates, setLiveUpdates] = useState<LiveDirectoryUpdates>({})
   const [error, setError] = useState<string>()
   const activeScansRef = useRef<Set<string>>(new Set())
+  const scanJobPathRef = useRef<Map<string, string>>(new Map())
   const navigationRequestRef = useRef(0)
 
   const listing = useMemo(
@@ -74,6 +78,18 @@ export function FsExplorer({
   const isNavigationPending = Boolean(pendingNavigation)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
   const isVolumesLevel = !currentPath
+  const busyOverlay = useMemo(
+    () =>
+      pendingNavigation
+        ? {
+            ...pendingNavigation,
+            infinite: true,
+            operationKey: `${pendingNavigation.phase}:${pendingNavigation.path}`,
+            ...progressSnapshotToOverlayProps(scanProgress, pendingNavigation.path),
+          }
+        : undefined,
+    [pendingNavigation, scanProgress],
+  )
 
   useEffect(() => {
     fsListVolumes()
@@ -122,21 +138,29 @@ export function FsExplorer({
 
   const handleProgress = useCallback(
     (event: FsProgressEvent) => {
+      if (event.event === "jobQueued" || event.event === "jobStarted") {
+        scanJobPathRef.current.set(progressEventKey(event.data.jobId, event.data.requestId), event.data.path)
+      }
       if (event.event === "directoryReady") {
+        scanJobPathRef.current.set(progressEventKey(event.data.jobId, event.data.requestId), event.data.path)
         mergeListing(event.data.listing)
       }
       if (event.event === "progressSnapshot") {
-        setScanProgress(event.data.snapshot)
+        const progressPath = scanJobPathRef.current.get(progressEventKey(event.data.jobId, event.data.requestId))
+        if (progressPath) {
+          setScanProgress({ path: progressPath, snapshot: event.data.snapshot })
+        }
         setPendingNavigation((pending) =>
-          pending && scanSnapshotMatchesPath(event.data.snapshot, pending.path)
+          pending && progressPath === pending.path
             ? { ...pending, entriesProcessed: event.data.snapshot.completedUnits, phase: "scanning" }
             : pending,
         )
       }
       if (event.event === "directoryProgress") {
-        setScanProgress(event.data.snapshot)
+        scanJobPathRef.current.set(progressEventKey(event.data.jobId, event.data.requestId), event.data.path)
+        setScanProgress({ path: event.data.path, snapshot: event.data.snapshot })
         setPendingNavigation((pending) =>
-          pending && (event.data.path === pending.path || scanSnapshotMatchesPath(event.data.snapshot, pending.path))
+          pending && event.data.path === pending.path
             ? { ...pending, entriesProcessed: event.data.snapshot.completedUnits, phase: "scanning" }
             : pending,
         )
@@ -149,9 +173,10 @@ export function FsExplorer({
         }))
       }
       if (event.event === "jobFinished" || event.event === "jobFailed") {
+        scanJobPathRef.current.delete(progressEventKey(event.data.jobId, event.data.requestId))
         activeScansRef.current.delete(scanKey(event.data.path))
         setLoadingPath((loadingPath) => (loadingPath === event.data.path ? undefined : loadingPath))
-        setScanProgress(undefined)
+        setScanProgress((progress) => (progress?.path === event.data.path ? undefined : progress))
         setPendingNavigation((pending) => (pending?.path === event.data.path ? undefined : pending))
         setLiveUpdates((updates) => {
           if (!updates[event.data.path]) {
@@ -175,19 +200,22 @@ export function FsExplorer({
 
       activeScansRef.current.add(key)
       setScanProgress({
-        jobId: "",
-        requestId: "",
-        state: "queued",
-        estimatedTotalBytes: null,
-        scheduledUnits: 0,
-        discoveredUnits: 0,
-        completedUnits: 0,
-        activeUnits: 0,
-        skippedUnits: 0,
-        failedUnits: 0,
-        canceledUnits: 0,
-        bytesMeasured: 0,
-        activePaths: [path],
+        path,
+        snapshot: {
+          jobId: "",
+          requestId: "",
+          state: "queued",
+          estimatedTotalBytes: null,
+          scheduledUnits: 0,
+          discoveredUnits: 0,
+          completedUnits: 0,
+          activeUnits: 0,
+          skippedUnits: 0,
+          failedUnits: 0,
+          canceledUnits: 0,
+          bytesMeasured: 0,
+          activePaths: [path],
+        },
       })
       try {
         await fsStartScan(path, volumeRoot, defaultScanConfig, handleProgress, replaceExisting)
@@ -355,7 +383,6 @@ export function FsExplorer({
           </Button>
         </ButtonGroup>
       </div>
-      {scanProgress ? <ScanProgressBar snapshot={scanProgress} /> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <ExplorerTable
         className={tableClassName}
@@ -363,7 +390,7 @@ export function FsExplorer({
         listing={listing}
         liveUpdates={listingLiveUpdates}
         loadingPath={loadingPath}
-        busyOverlay={pendingNavigation}
+        busyOverlay={busyOverlay}
         selectedItemIds={selectedItemIds}
         selectionAnchorId={explorerSelectionAnchorId}
         onOpenVolume={openVolume}
@@ -383,8 +410,8 @@ function scanKey(path: string) {
   return `${path}::${JSON.stringify(defaultScanConfig)}`
 }
 
-function scanSnapshotMatchesPath(snapshot: ProgressSnapshotDto, path: string) {
-  return snapshot.activePaths.includes(path)
+function progressEventKey(jobId: string, requestId: string) {
+  return `${jobId}:${requestId}`
 }
 
 function volumeToVisualizerItem(volume: DriveDto): VisualizerCellInput {
@@ -442,19 +469,24 @@ function isInsideRoot(path: string, rootPath: string) {
     : path === rootPath || path.startsWith(`${rootPath}/`)
 }
 
-function ScanProgressBar({ snapshot }: { snapshot: ProgressSnapshotDto }) {
+function progressSnapshotToOverlayProps(progress: ScanProgressState | undefined, path: string) {
+  if (!progress || progress.path !== path) {
+    return {}
+  }
+
+  const { snapshot } = progress
   const totalBytes = snapshot.estimatedTotalBytes ?? 0
   const hasEstimate = totalBytes > 0
-  const percent = hasEstimate
-    ? Math.min(snapshot.state === "completed" ? 100 : 99, (snapshot.bytesMeasured / totalBytes) * 100)
-    : 0
+  if (!hasEstimate) {
+    return {
+      infinite: true,
+    }
+  }
 
-  return (
-    <div className="flex h-5 items-center gap-2">
-      <Progress value={percent} className="h-1.5 flex-1" />
-      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {hasEstimate ? `${Math.round(percent)}%` : "Scan"}
-      </span>
-    </div>
-  )
+  const percent = Math.min(snapshot.state === "completed" ? 100 : 99, (snapshot.bytesMeasured / totalBytes) * 100)
+
+  return {
+    infinite: false,
+    progress: percent,
+  }
 }

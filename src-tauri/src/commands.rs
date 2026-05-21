@@ -289,6 +289,19 @@ pub fn fs_open_folder(path: String, app: AppHandle) -> Result<(), CommandError> 
 }
 
 #[tauri::command]
+pub fn fs_open_terminal(path: String) -> Result<(), CommandError> {
+    let path = existing_absolute_path(&path)?;
+    if !path.is_dir() {
+        return Err(CommandError::new(
+            CommandErrorCode::OpenItemFailed,
+            format!("Path is not a folder: {}", path.display()),
+        ));
+    }
+
+    open_terminal_at_path(&path)
+}
+
+#[tauri::command]
 pub fn fs_preview_item(path: String, app: AppHandle) -> Result<(), CommandError> {
     let path = existing_absolute_path(&path)?;
     log::info!("previewing filesystem item {}", path.display());
@@ -343,6 +356,43 @@ pub fn check_permissions(root: Option<String>) -> PermissionCheckDto {
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn open_terminal_at_path(path: &std::path::Path) -> Result<(), CommandError> {
+    log::info!("opening terminal at filesystem folder {}", path.display());
+    let status = std::process::Command::new("open")
+        .arg("-a")
+        .arg("Terminal")
+        .arg(path)
+        .status()
+        .map_err(|error| {
+            log::warn!("failed to launch Terminal for {}: {error}", path.display());
+            CommandError::new(
+                CommandErrorCode::OpenItemFailed,
+                format!("Failed to open Terminal for {}: {error}", path.display()),
+            )
+        })?;
+
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(CommandError::new(
+        CommandErrorCode::OpenItemFailed,
+        format!("Terminal exited with status {status} for {}", path.display()),
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_terminal_at_path(path: &std::path::Path) -> Result<(), CommandError> {
+    Err(CommandError::new(
+        CommandErrorCode::OpenItemFailed,
+        format!(
+            "Opening a terminal is not supported on this platform for {}.",
+            path.display()
+        ),
+    ))
 }
 
 fn existing_absolute_path(path: &str) -> Result<PathBuf, CommandError> {

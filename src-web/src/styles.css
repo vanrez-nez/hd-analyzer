@@ -15,6 +15,48 @@
   }
 }
 
+@layer components {
+  .fs-explorer-loader {
+    display: inline-block;
+    box-sizing: border-box;
+    position: relative;
+    width: 180.5px;
+    height: 180.5px;
+    border-radius: 50%;
+    color: var(--foreground);
+    --fs-explorer-loader-track: color-mix(in oklch, var(--foreground) 20%, transparent);
+    background: linear-gradient(
+      0deg,
+      var(--fs-explorer-loader-track) 33%,
+      var(--foreground) 100%
+    );
+    animation: fs-explorer-loader-rotation 1s linear infinite;
+  }
+
+  .fs-explorer-loader::after {
+    content: "";
+    box-sizing: border-box;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 172.9px;
+    height: 172.9px;
+    border-radius: 50%;
+    background: var(--background);
+    transform: translate(-50%, -50%);
+  }
+
+  @keyframes fs-explorer-loader-rotation {
+    0% {
+      transform: rotate(0deg);
+    }
+
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+}
+
 @layer base {
   :root {
     --background: oklch(0.9195 0.0169 88.0030);

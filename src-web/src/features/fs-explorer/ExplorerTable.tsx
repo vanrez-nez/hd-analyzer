@@ -7,6 +7,7 @@ import {
   Folder,
   FolderOpenIcon,
   HardDrive,
+  SquareTerminalIcon,
   Trash2Icon,
 } from "lucide-react"
 import AutoSizer from "react-virtualized/dist/es/AutoSizer"
@@ -15,9 +16,10 @@ import List, { type ListRowProps } from "react-virtualized/dist/es/List"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { openFolder, openItemLocation, previewItem } from "@/api"
+import { openFolder, openItemLocation, openTerminal, previewItem } from "@/api"
 import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
+import { ExplorerLoadingOverlay, type ExplorerLoadingOverlayProps } from "./ExplorerLoadingOverlay"
 import type {
   DeleteSafetyClassification,
   DirectoryListingDto,
@@ -45,10 +47,7 @@ type StatusItem = {
   totalSpace?: number
   availableSpace?: number
 }
-type ExplorerBusyOverlay = {
-  entriesProcessed: number
-  phase: "opening" | "scanning"
-}
+type ExplorerBusyOverlay = ExplorerLoadingOverlayProps
 type ExplorerRow = DriveDto | PathNodeDto
 type RowCounts = {
   directories: number
@@ -304,7 +303,7 @@ export function ExplorerTable({
         </div>
         <ExplorerStatusBar listing={listing} rowCounts={rowCounts} selectedRows={selectedStatusItems} />
       </div>
-      {busyOverlay ? <TableBusyOverlay overlay={busyOverlay} /> : null}
+      {busyOverlay ? <ExplorerLoadingOverlay {...busyOverlay} /> : null}
     </div>
   )
 }
@@ -335,20 +334,6 @@ function NameCell({ row }: { row: ExplorerRow }) {
         {row.name}
       </span>
     </span>
-  )
-}
-
-function TableBusyOverlay({ overlay }: { overlay: ExplorerBusyOverlay }) {
-  const phaseLabel = overlay.phase === "opening" ? "Opening" : "Scanning"
-
-  return (
-    <div className="absolute inset-0 flex items-center justify-center" aria-live="polite">
-      <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm shadow-sm">
-        <Spinner />
-        <span className="font-medium">{phaseLabel}</span>
-        <span className="text-muted-foreground">{formatCount(overlay.entriesProcessed, "item")} processed</span>
-      </div>
-    </div>
   )
 }
 
@@ -402,6 +387,9 @@ function ExplorerStatusBar({
 
     void openItemLocation(selectedRows.map((row) => row.path)).catch(() => undefined)
   }
+  const handleOpenTerminal = () => {
+    void openTerminal(listing.path).catch(() => undefined)
+  }
   const handlePreview = () => {
     if (!selected || selected.kind !== "file") {
       return
@@ -434,6 +422,9 @@ function ExplorerStatusBar({
         ) : null}
         <Button type="button" variant="ghost" size="icon-sm" aria-label={openLocationLabel} onClick={handleOpenLocation}>
           <FolderOpenIcon data-icon="inline-start" />
+        </Button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Open terminal in current folder" onClick={handleOpenTerminal}>
+          <SquareTerminalIcon data-icon="inline-start" />
         </Button>
         {selectedRows.length === 1 ? (
           <Button

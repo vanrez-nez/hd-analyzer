@@ -3,6 +3,7 @@ import type { MouseEvent, MutableRefObject } from "react"
 
 import type { VisualizerLevelSnapshot } from "./types"
 import { Honeycomb } from "./honeycomb"
+import { LegendVisualizer } from "./legend-visualizer"
 import { Voronoi } from "./voronoi"
 import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import type { ColorScheme } from "@/lib/use-system-color-scheme"
@@ -95,6 +96,7 @@ export function Visualizer({
           onExplorerSelectionAnchorChange(nextSelection[0] ?? null)
         }}
       />
+      <LegendVisualizer colorScheme={colorScheme} items={snapshot.items} />
     </div>
   )
 }

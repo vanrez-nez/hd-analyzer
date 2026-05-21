@@ -146,6 +146,22 @@ export async function openFolder(path: string): Promise<void> {
   }
 }
 
+export async function openTerminal(path: string): Promise<void> {
+  const terminalPath = path.trim()
+  if (terminalPath.length === 0) {
+    return
+  }
+
+  await appLog.info("open terminal started", { path: terminalPath })
+  try {
+    await invokeLogged<void>("fs_open_terminal", { path: terminalPath })
+    await appLog.info("open terminal completed", { path: terminalPath })
+  } catch (error) {
+    await appLog.error("open terminal failed", { error, path: terminalPath })
+    throw error
+  }
+}
+
 export async function previewItem(path: string): Promise<void> {
   const previewPath = path.trim()
   if (previewPath.length === 0) {
