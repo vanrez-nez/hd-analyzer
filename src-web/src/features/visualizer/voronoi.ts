@@ -261,7 +261,7 @@ function createCells(
       .minWeightRatio(VORONOI_MIN_WEIGHT_RATIO)
       .convergenceRatio(CONVERGENCE)
       .maxIterationCount(ITERATIONS)
-      .prng(createRandom(hashLayout(snapshot, clusterResult.sites)))
+      .prng(createRandom(hashLayoutSeed(snapshot)))
     treemap(root)
 
     const children = root.children ?? []
@@ -335,16 +335,17 @@ function createLayoutCell(cell: RenderCell, colorScheme: ColorScheme): Visualize
 }
 
 function createTreemapRoot(sites: VoronoiSite[]): TreemapNode {
+  const layoutSites = sortSitesByLayoutKey(sites)
   const root: TreemapNode = {
     children: [],
     data: {},
     depth: 0,
     height: 0,
     parent: null,
-    value: sites.reduce((total, site) => total + site.weight, 0),
+    value: layoutSites.reduce((total, site) => total + site.weight, 0),
   }
 
-  root.children = sites.map((site) => createSiteNode(site, root, 1))
+  root.children = layoutSites.map((site) => createSiteNode(site, root, 1))
   root.height = root.children.length > 0 ? Math.max(...root.children.map((child) => child.height)) + 1 : 0
   return root
 }
@@ -363,7 +364,7 @@ function createSiteNode(site: VoronoiSite, parent: TreemapNode, depth: number): 
   }
 
   if (!shouldRenderAsClusterCell) {
-    node.children = site.members.map((item) => createItemNode(site, item, node, depth + 1))
+    node.children = sortItemsByLayoutKey(site.members).map((item) => createItemNode(site, item, node, depth + 1))
   }
 
   return node
@@ -717,6 +718,14 @@ function sortSites(sites: VoronoiSite[]) {
   return [...sites].sort(compareSiteWeightDesc)
 }
 
+function sortSitesByLayoutKey(sites: VoronoiSite[]) {
+  return [...sites].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function sortItemsByLayoutKey(items: FileItem[]) {
+  return [...items].sort((left, right) => left.id.localeCompare(right.id))
+}
+
 function compareSiteWeightDesc(a: VoronoiSite, b: VoronoiSite) {
   return b.weight - a.weight || siteSortId(a).localeCompare(siteSortId(b))
 }
@@ -797,7 +806,7 @@ function hasMixedTypes(members: FileItem[]) {
 function hashMemberIds(members: FileItem[]) {
   let hash = 2166136261
 
-  for (const member of members) {
+  for (const member of sortItemsByLayoutKey(members)) {
     const id = String(member.id)
     for (let index = 0; index < id.length; index += 1) {
       hash ^= id.charCodeAt(index)
@@ -996,11 +1005,8 @@ function drawCirclePath(context: CanvasRenderingContext2D, circle: CircleBounds)
   context.arc(circle.centerX, circle.centerY, circle.radius, 0, Math.PI * 2)
 }
 
-function hashLayout(snapshot: VisualizerLevelSnapshot, sites: VoronoiSite[]) {
-  return sites.reduce(
-    (hash, site) => hash ^ hashString(`${site.id}:${site.weight}`),
-    hashString(snapshot.path ?? "volumes") ^ DEFAULT_SEED,
-  ) >>> 0
+function hashLayoutSeed(snapshot: VisualizerLevelSnapshot) {
+  return (hashString(snapshot.path ?? "volumes") ^ DEFAULT_SEED) >>> 0
 }
 
 function hashString(value: string) {

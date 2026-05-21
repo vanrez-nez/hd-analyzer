@@ -16,6 +16,7 @@ type SortState = {
 }
 
 const ROW_ICON_CLASS = "size-3.5 shrink-0"
+const EXPLORER_ROW_SELECTOR = "[data-explorer-row]"
 
 type ExplorerTableProps = {
   className?: string
@@ -97,6 +98,19 @@ export function ExplorerTable({
     onSelectionAnchorChange(itemId)
   }
 
+  const clearSelectionOnEmptyListClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest(EXPLORER_ROW_SELECTOR)) {
+      return
+    }
+
+    if (selectedItemIds.length === 0 && !selectionAnchorId) {
+      return
+    }
+
+    onSelectionChange([])
+    onSelectionAnchorChange(null)
+  }
+
   const toggleSort = (column: SortColumn) => {
     setSort((current) => ({
       column,
@@ -118,7 +132,10 @@ export function ExplorerTable({
           </TableRow>
         </TableHeader>
       </Table>
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none"
+        onClick={clearSelectionOnEmptyListClick}
+      >
         <Table className="block w-full">
           <TableBody className="block">
             {!listing
@@ -129,6 +146,7 @@ export function ExplorerTable({
                     <TableRow
                       aria-selected={selected}
                       className={selectableRowClassName("cursor-pointer select-none", selected)}
+                      data-explorer-row
                       key={volume.id}
                       ref={(element) => setRowElement(volume.id, element)}
                       onClick={(event) => selectRow(volume.id, event)}
@@ -156,6 +174,7 @@ export function ExplorerTable({
                         node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
                         selected,
                       )}
+                      data-explorer-row
                       key={node.path}
                       ref={(element) => setRowElement(node.path, element)}
                       title={node.deleteSafety?.reason}
