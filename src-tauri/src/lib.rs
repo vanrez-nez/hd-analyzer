@@ -3,9 +3,9 @@ mod dto;
 mod state;
 
 use commands::{
-    check_permissions, fs_cancel_job, fs_get_directory, fs_invalidate_path, fs_list_volumes,
-    fs_open_folder, fs_open_path, fs_open_path_with_progress, fs_preview_item, fs_reveal_items,
-    fs_open_terminal, fs_start_scan,
+    check_permissions, fs_cancel_job, fs_delete_items, fs_get_directory, fs_invalidate_path,
+    fs_list_volumes, fs_open_folder, fs_open_path, fs_open_path_with_progress, fs_open_terminal,
+    fs_preview_item, fs_reveal_items, fs_start_scan,
 };
 use state::AppState;
 use tauri_plugin_log::{Target, TargetKind};
@@ -40,6 +40,7 @@ pub fn run() {
             fs_start_scan,
             fs_cancel_job,
             fs_invalidate_path,
+            fs_delete_items,
             fs_open_folder,
             fs_open_terminal,
             fs_reveal_items,

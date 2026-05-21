@@ -423,6 +423,12 @@ impl From<DriverEvent> for FsProgressEventDto {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct DeleteReceiptDto {
+    pub deleted_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionCheckDto {
     pub granted: bool,
     pub message: String,
@@ -439,6 +445,7 @@ pub enum CommandErrorCode {
     DriverUnavailable,
     JobNotFound,
     OpenItemFailed,
+    DeleteFailed,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

@@ -8,7 +8,6 @@ type PathButtonGroupProps = {
   disabled?: boolean
   path?: string
   rootPath?: string
-  rootLabel?: string
   labelMaxLength?: number
   onNavigate: (path: string) => void
   onBackToRoot: () => void
@@ -20,7 +19,6 @@ export function PathButtonGroup({
   disabled = false,
   path,
   rootPath,
-  rootLabel,
   labelMaxLength = DEFAULT_LABEL_MAX_LENGTH,
   onNavigate,
   onBackToRoot,
@@ -41,13 +39,13 @@ export function PathButtonGroup({
 
     scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
     updateLeftFade()
-  }, [path, rootLabel, rootPath, updateLeftFade])
+  }, [path, rootPath, updateLeftFade])
 
-  if (!path || !rootPath || !rootLabel) {
+  if (!path || !rootPath) {
     return null
   }
 
-  const parts = buildPathSegments(path, rootPath, rootLabel)
+  const parts = buildPathSegments(path, rootPath)
   const backPath = getBackPath(path, rootPath)
 
   return (
@@ -70,48 +68,51 @@ export function PathButtonGroup({
           <ArrowLeftIcon data-icon="inline-start" />
         </Button>
       </ButtonGroup>
-      <div className="relative min-w-0 flex-1 overflow-hidden">
-        <div
-          ref={scrollRef}
-          className="scrollbar-hidden min-w-0 max-w-full overflow-x-auto overflow-y-hidden"
-          onScroll={updateLeftFade}
-        >
-          <ButtonGroup className="min-w-max">
-            {parts.map((part) => (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-w-0 max-w-none"
-                disabled={disabled}
-                key={part.path}
-                title={part.label}
-                onClick={() => onNavigate(part.path)}
-              >
-                {truncateMiddle(part.label, labelMaxLength)}
-              </Button>
-            ))}
-          </ButtonGroup>
+      {parts.length > 0 ? (
+        <div className="relative min-w-0 flex-1 overflow-hidden">
+          <div
+            ref={scrollRef}
+            className="scrollbar-hidden min-w-0 max-w-full overflow-x-auto overflow-y-hidden"
+            onScroll={updateLeftFade}
+          >
+            <ButtonGroup className="min-w-max">
+              {parts.map((part) => (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-w-0 max-w-none"
+                  disabled={disabled}
+                  key={part.path}
+                  title={part.label}
+                  onClick={() => onNavigate(part.path)}
+                >
+                  {truncateMiddle(part.label, labelMaxLength)}
+                </Button>
+              ))}
+            </ButtonGroup>
+          </div>
+          {showLeftFade ? (
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent" />
+          ) : null}
         </div>
-        {showLeftFade ? (
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent" />
-        ) : null}
-      </div>
+      ) : (
+        <div className="min-w-0 flex-1" />
+      )}
     </ButtonGroup>
   )
 }
 
-export function buildPathSegments(path: string, rootPath: string, rootLabel: string) {
+export function buildPathSegments(path: string, rootPath: string) {
   const normalizedPath = normalizePath(path)
   const normalizedRoot = normalizePath(rootPath)
-  const displayRootLabel = volumeNameOnly(rootLabel, normalizedRoot)
 
   if (!isInsideRoot(normalizedPath, normalizedRoot)) {
-    return [{ label: displayRootLabel, path: normalizedRoot }]
+    return []
   }
 
   if (normalizedPath === normalizedRoot) {
-    return [{ label: displayRootLabel, path: normalizedRoot }]
+    return []
   }
 
   const relative = normalizedPath.slice(normalizedRoot.length).replace(/^\/+/, "")
@@ -124,7 +125,7 @@ export function buildPathSegments(path: string, rootPath: string, rootLabel: str
     }
   })
 
-  return [{ label: displayRootLabel, path: normalizedRoot }, ...parts]
+  return parts
 }
 
 export function getBackPath(path: string, rootPath: string) {
@@ -163,27 +164,6 @@ export function truncateMiddle(value: string, maxLength: number) {
 function normalizePath(path: string) {
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "")
   return normalized || "/"
-}
-
-function volumeNameOnly(label: string, rootPath: string) {
-  const trimmed = label.trim()
-  const suffixMatch = trimmed.match(/^(.*?)\s+\((.*)\)$/)
-  if (suffixMatch?.[2] && normalizePath(suffixMatch[2]) === rootPath) {
-    return suffixMatch[1].trim() || lastPathPart(rootPath)
-  }
-
-  if (normalizePath(trimmed) === rootPath || trimmed.startsWith("/")) {
-    return lastPathPart(rootPath)
-  }
-
-  return trimmed || lastPathPart(rootPath)
-}
-
-function lastPathPart(path: string) {
-  if (path === "/") {
-    return "/"
-  }
-  return path.split("/").filter(Boolean).at(-1) ?? path
 }
 
 function isInsideRoot(path: string, rootPath: string) {

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PanelRightOpenIcon, RefreshCwIcon, ShieldCheck } from "lucide-react"
 
-import { fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
+import { deleteItems, fsInvalidatePath, fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Button } from "@/components/ui/button"
 import { ExplorerTable } from "./ExplorerTable"
 import { PathButtonGroup } from "./PathButtonGroup"
-import { createExplorerCache, getCachedListing, putCachedListing } from "./cache"
+import { VolumeDetails } from "./VolumeDetails"
+import { createExplorerCache, getCachedListing, markPathStale, putCachedListing } from "./cache"
 import type { VisualizerCellInput, VisualizerLevelSnapshot } from "@/features/visualizer/types"
 import type {
   DirectoryListingDto,
@@ -229,13 +230,13 @@ export function FsExplorer({
   )
 
   const openPath = useCallback(
-    async (path: string, volume = selectedVolume) => {
+    async (path: string, volume = selectedVolume, forceRefresh = false) => {
       if (!volume) {
         return
       }
       const volumeRoot = volume.mountPoint
       const cached = getCachedListing(cache, path)
-      if (cached) {
+      if (cached && !forceRefresh) {
         navigationRequestRef.current += 1
         setCurrentPath(cached.path)
         setPendingNavigation(undefined)
@@ -290,6 +291,28 @@ export function FsExplorer({
       }
     },
     [cache, mergeListing, selectedVolume, startScan],
+  )
+
+  const deleteExplorerItems = useCallback(
+    async (paths: string[], moveToTrash: boolean) => {
+      if (!selectedVolume || !currentPath || paths.length === 0) {
+        return
+      }
+
+      setError(undefined)
+      try {
+        await deleteItems(paths, selectedVolume.mountPoint, moveToTrash)
+        await fsInvalidatePath(currentPath, selectedVolume.mountPoint)
+        setCache((cache) => markPathStale(cache, currentPath, true))
+        onSelectionChange([])
+        onExplorerSelectionAnchorChange(null)
+        await openPath(currentPath, selectedVolume, true)
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error))
+        throw error
+      }
+    },
+    [currentPath, onExplorerSelectionAnchorChange, onSelectionChange, openPath, selectedVolume],
   )
 
   const openVolume = (volume: DriveDto) => {
@@ -352,7 +375,6 @@ export function FsExplorer({
           <PathButtonGroup
             path={currentPath}
             rootPath={selectedVolume?.mountPoint}
-            rootLabel={selectedVolume?.label}
             disabled={isNavigationPending}
             onNavigate={(path) => void openPath(path)}
             onBackToRoot={returnToVolumes}
@@ -395,9 +417,11 @@ export function FsExplorer({
         selectionAnchorId={explorerSelectionAnchorId}
         onOpenVolume={openVolume}
         onOpenNode={openNode}
+        onDeleteItems={deleteExplorerItems}
         onSelectionAnchorChange={onExplorerSelectionAnchorChange}
         onSelectionChange={onSelectionChange}
       />
+      {selectedVolume ? <VolumeDetails volume={selectedVolume} /> : null}
     </section>
   )
 }

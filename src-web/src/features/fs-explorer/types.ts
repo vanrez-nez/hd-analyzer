@@ -164,6 +164,10 @@ export type InvalidationReceiptDto = {
   supersededJobIds: string[]
 }
 
+export type DeleteReceiptDto = {
+  deletedPaths: string[]
+}
+
 export type ExplorerCache = {
   listings: Record<string, DirectoryListingDto>
 }

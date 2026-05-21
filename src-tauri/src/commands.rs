@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hd_analyzer_core::{HdDriver, OpenPathRequest, StartScanRequest};
@@ -7,9 +7,9 @@ use tauri::{AppHandle, State, ipc::Channel};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::dto::{
-    CommandError, CommandErrorCode, DirectoryListingDto, DriveDto, FsOpenProgressEventDto,
-    FsProgressEventDto, InvalidationReceiptDto, InvalidationScopeDto, PermissionCheckDto,
-    ScanConfigDto, StartScanReceiptDto,
+    CommandError, CommandErrorCode, DeleteReceiptDto, DirectoryListingDto, DriveDto,
+    FsOpenProgressEventDto, FsProgressEventDto, InvalidationReceiptDto, InvalidationScopeDto,
+    PermissionCheckDto, ScanConfigDto, StartScanReceiptDto,
 };
 use crate::state::AppState;
 
@@ -280,7 +280,10 @@ pub fn fs_open_folder(path: String, app: AppHandle) -> Result<(), CommandError> 
     app.opener()
         .open_path(path.display().to_string(), None::<&str>)
         .map_err(|error| {
-            log::warn!("failed to open filesystem folder {}: {error}", path.display());
+            log::warn!(
+                "failed to open filesystem folder {}: {error}",
+                path.display()
+            );
             CommandError::new(
                 CommandErrorCode::OpenItemFailed,
                 format!("Failed to open {}: {error}", path.display()),
@@ -317,6 +320,65 @@ pub fn fs_preview_item(path: String, app: AppHandle) -> Result<(), CommandError>
                 format!("Failed to preview {}: {error}", path.display()),
             )
         })
+}
+
+#[tauri::command]
+pub fn fs_delete_items(
+    paths: Vec<String>,
+    volume_root: String,
+    move_to_trash: Option<bool>,
+) -> Result<DeleteReceiptDto, CommandError> {
+    let volume_root = existing_absolute_path(&volume_root)?;
+    if !volume_root.is_dir() {
+        return Err(CommandError::new(
+            CommandErrorCode::InvalidRoot,
+            format!("Volume root is not a folder: {}", volume_root.display()),
+        ));
+    }
+
+    let paths = paths
+        .iter()
+        .filter(|path| !path.trim().is_empty())
+        .map(|path| existing_absolute_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    if paths.is_empty() {
+        return Ok(DeleteReceiptDto {
+            deleted_paths: Vec::new(),
+        });
+    }
+
+    for path in &paths {
+        ensure_delete_path_allowed(&volume_root, path)?;
+    }
+
+    let deleted_paths = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    let use_trash = move_to_trash.unwrap_or(true);
+    log::info!(
+        "{} {} filesystem item(s)",
+        if use_trash {
+            "moving to trash"
+        } else {
+            "permanently deleting"
+        },
+        paths.len()
+    );
+
+    if use_trash {
+        trash::delete_all(&paths).map_err(|error| {
+            log::warn!("failed to move filesystem item(s) to trash: {error}");
+            CommandError::new(
+                CommandErrorCode::DeleteFailed,
+                format!("Failed to move selected item(s) to Trash: {error}"),
+            )
+        })?;
+    } else {
+        delete_paths_permanently(&paths)?;
+    }
+
+    Ok(DeleteReceiptDto { deleted_paths })
 }
 
 #[tauri::command]
@@ -380,7 +442,10 @@ fn open_terminal_at_path(path: &std::path::Path) -> Result<(), CommandError> {
 
     Err(CommandError::new(
         CommandErrorCode::OpenItemFailed,
-        format!("Terminal exited with status {status} for {}", path.display()),
+        format!(
+            "Terminal exited with status {status} for {}",
+            path.display()
+        ),
     ))
 }
 
@@ -418,6 +483,58 @@ fn existing_absolute_path(path: &str) -> Result<PathBuf, CommandError> {
             format!("Cannot access {}: {error}", path.display()),
         )
     })
+}
+
+fn ensure_delete_path_allowed(volume_root: &Path, path: &Path) -> Result<(), CommandError> {
+    if path == volume_root {
+        return Err(CommandError::new(
+            CommandErrorCode::DeleteFailed,
+            format!(
+                "Refusing to delete selected volume root: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    if !path.starts_with(volume_root) {
+        return Err(CommandError::new(
+            CommandErrorCode::PathOutsideVolume,
+            format!(
+                "Refusing to delete path outside selected volume: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let safety = hd_analyzer_core::safety::classify_path_safety(path);
+    if !safety.can_delete_now {
+        return Err(CommandError::new(
+            CommandErrorCode::DeleteFailed,
+            format!("{} cannot be deleted: {}", path.display(), safety.reason),
+        ));
+    }
+
+    Ok(())
+}
+
+fn delete_paths_permanently(paths: &[PathBuf]) -> Result<(), CommandError> {
+    for path in paths {
+        let result = if path.is_dir() {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        };
+
+        result.map_err(|error| {
+            log::warn!("failed to permanently delete {}: {error}", path.display());
+            CommandError::new(
+                CommandErrorCode::DeleteFailed,
+                format!("Failed to delete {}: {error}", path.display()),
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn chrono_like_timestamp() -> String {

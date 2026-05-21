@@ -13,8 +13,18 @@ import {
 import AutoSizer from "react-virtualized/dist/es/AutoSizer"
 import List, { type ListRowProps } from "react-virtualized/dist/es/List"
 
-import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { openFolder, openItemLocation, openTerminal, previewItem } from "@/api"
 import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
@@ -84,6 +94,7 @@ type ExplorerTableProps = {
   loadingPath?: string
   selectedItemIds: string[]
   selectionAnchorId: string | null
+  onDeleteItems: (paths: string[], moveToTrash: boolean) => Promise<void>
   onOpenVolume: (volume: DriveDto) => void
   onOpenNode: (node: PathNodeDto) => void
   onSelectionAnchorChange: (itemId: string | null) => void
@@ -99,6 +110,7 @@ export function ExplorerTable({
   loadingPath,
   selectedItemIds,
   selectionAnchorId,
+  onDeleteItems,
   onOpenVolume,
   onOpenNode,
   onSelectionAnchorChange,
@@ -301,7 +313,12 @@ export function ExplorerTable({
             }}
           </AutoSizer>
         </div>
-        <ExplorerStatusBar listing={listing} rowCounts={rowCounts} selectedRows={selectedStatusItems} />
+        <ExplorerStatusBar
+          listing={listing}
+          rowCounts={rowCounts}
+          selectedRows={selectedStatusItems}
+          onDeleteItems={onDeleteItems}
+        />
       </div>
       {busyOverlay ? <ExplorerLoadingOverlay {...busyOverlay} /> : null}
     </div>
@@ -339,13 +356,18 @@ function NameCell({ row }: { row: ExplorerRow }) {
 
 function ExplorerStatusBar({
   listing,
+  onDeleteItems,
   rowCounts,
   selectedRows,
 }: {
   listing?: DirectoryListingDto
+  onDeleteItems: (paths: string[], moveToTrash: boolean) => Promise<void>
   rowCounts: RowCounts
   selectedRows: StatusItem[]
 }) {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [moveToTrash, setMoveToTrash] = useState(true)
   const selected = selectedRows[0]
   const isRootVolumes = !listing
 
@@ -378,7 +400,30 @@ function ExplorerStatusBar({
   const totalSelectedSize = selectedRows.reduce((total, row) => total + row.size, 0)
   const canDeleteSelection = selectedRows.every((row) => row.canDeleteNow !== false)
   const canPreviewSelection = selectedRows.length === 1 && selected?.kind === "file"
+  const deleteDialogTitle =
+    selectedRows.length === 1 && selected
+      ? `Are you sure to delete: ${selected.label}`
+      : `Are you sure to delete: ${selectedRows.length} selected files`
   const openLocationLabel = selectedRows.length > 0 ? "Open selected item location" : "Open current folder location"
+  const handleDeleteClick = () => {
+    setMoveToTrash(true)
+    setDeleteDialogOpen(true)
+  }
+  const handleConfirmDelete = async () => {
+    if (selectedRows.length === 0 || !canDeleteSelection) {
+      return
+    }
+
+    setIsDeleting(true)
+    try {
+      await onDeleteItems(selectedRows.map((row) => row.path), moveToTrash)
+      setDeleteDialogOpen(false)
+    } catch {
+      // FsExplorer owns surfacing the command error in the explorer error area.
+    } finally {
+      setIsDeleting(false)
+    }
+  }
   const handleOpenLocation = () => {
     if (selectedRows.length === 0) {
       void openFolder(listing.path).catch(() => undefined)
@@ -409,16 +454,45 @@ function ExplorerStatusBar({
       </span>
       <div className="flex shrink-0 items-center gap-1">
         {selectedRows.length > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete selected items"
-            disabled={!canDeleteSelection}
-            onClick={noopAction}
-          >
-            <Trash2Icon data-icon="inline-start" />
-          </Button>
+          <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Delete selected items"
+              disabled={!canDeleteSelection || isDeleting}
+              onClick={handleDeleteClick}
+            >
+              <Trash2Icon data-icon="inline-start" />
+            </Button>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{deleteDialogTitle}</AlertDialogTitle>
+                <AlertDialogDescription className="sr-only">
+                  Confirm deletion for the selected filesystem item(s).
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="flex items-center justify-between gap-4">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Switch checked={moveToTrash} disabled={isDeleting} onCheckedChange={setMoveToTrash} />
+                  <span>Move to trash</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className={buttonVariants({ variant: "destructive" })}
+                    disabled={isDeleting}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      void handleConfirmDelete()
+                    }}
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </div>
+              </div>
+            </AlertDialogContent>
+          </AlertDialog>
         ) : null}
         <Button type="button" variant="ghost" size="icon-sm" aria-label={openLocationLabel} onClick={handleOpenLocation}>
           <FolderOpenIcon data-icon="inline-start" />
@@ -572,8 +646,6 @@ function formatCount(count: number, noun: string) {
   const plural = noun.endsWith("y") ? `${noun.slice(0, -1)}ies` : `${noun}s`
   return `${count} ${plural}`
 }
-
-function noopAction() {}
 
 function calculateSizeColumnWidth(
   rows: ExplorerRow[],

@@ -8,6 +8,7 @@ import { appLog } from "@/lib/logging"
 
 import type {
   DirectoryListingDto,
+  DeleteReceiptDto,
   DriveDto as FsDriveDto,
   FsOpenProgressEvent,
   FsProgressEvent,
@@ -174,6 +175,34 @@ export async function previewItem(path: string): Promise<void> {
     await appLog.info("preview item completed", { path: previewPath })
   } catch (error) {
     await appLog.error("preview item failed", { error, path: previewPath })
+    throw error
+  }
+}
+
+export async function deleteItems(
+  paths: string[],
+  volumeRoot: string,
+  moveToTrash: boolean,
+): Promise<DeleteReceiptDto> {
+  const deletePaths = paths.filter((path) => path.trim().length > 0)
+  if (deletePaths.length === 0) {
+    return { deletedPaths: [] }
+  }
+
+  await appLog.info("delete items started", { pathCount: deletePaths.length, moveToTrash })
+  try {
+    const receipt = await invokeLogged<DeleteReceiptDto>("fs_delete_items", {
+      paths: deletePaths,
+      volumeRoot,
+      moveToTrash,
+    })
+    await appLog.info("delete items completed", {
+      deletedPathCount: receipt.deletedPaths.length,
+      moveToTrash,
+    })
+    return receipt
+  } catch (error) {
+    await appLog.error("delete items failed", { error, pathCount: deletePaths.length, moveToTrash })
     throw error
   }
 }
