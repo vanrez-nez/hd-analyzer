@@ -9,21 +9,29 @@ import {
   HardDrive,
   Trash2Icon,
 } from "lucide-react"
+import AutoSizer from "react-virtualized/dist/es/AutoSizer"
+import List, { type ListRowProps } from "react-virtualized/dist/es/List"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { openItemLocation, previewItem } from "@/api"
-import { isToggleSelectionInput, rangeSelection, replaceSelection, toggleSelection } from "@/lib/selection"
+import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
-import type { DeleteSafetyClassification, DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
-import type { MouseEvent } from "react"
+import type {
+  DeleteSafetyClassification,
+  DirectoryListingDto,
+  DirectoryProgressUpdateDto,
+  DriveDto,
+  PathNodeDto,
+} from "./types"
+import type { CSSProperties, MouseEvent } from "react"
 
 type SortColumn = "name" | "size"
-type SortDirection = "asc" | "desc"
+type SortDirectionState = "asc" | "desc"
 type SortState = {
   column: SortColumn
-  direction: SortDirection
+  direction: SortDirectionState
 }
 type StatusItem = {
   canDeleteNow?: boolean
@@ -41,13 +49,37 @@ type ExplorerBusyOverlay = {
   entriesProcessed: number
   phase: "opening" | "scanning"
 }
+type ExplorerRow = DriveDto | PathNodeDto
+type RowCounts = {
+  directories: number
+  files: number
+  volumes: number
+}
+type RowsRenderedRange = {
+  startIndex: number
+  stopIndex: number
+}
+type ExplorerTableStyle = CSSProperties & {
+  "--explorer-size-column-width": string
+}
 
+const ROW_HEIGHT = 32
+const OVERSCAN_ROW_COUNT = 24
 const ROW_ICON_CLASS = "size-3.5 shrink-0"
 const EXPLORER_ROW_SELECTOR = "[data-explorer-row]"
+const SIZE_COLUMN_MIN_WIDTH = 72
+const SIZE_COLUMN_MAX_WIDTH = 160
+const SIZE_COLUMN_HORIZONTAL_PADDING = 24
+const SIZE_COLUMN_SORT_AFFORDANCE_WIDTH = 18
+const SIZE_COLUMN_SPINNER_WIDTH = 16
+const SIZE_COLUMN_TEXT_FONT = '400 12px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+const SIZE_COLUMN_HEADER_FONT = '500 12px Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+const SIZE_COLUMN_FALLBACK_CHAR_WIDTH = 7
 
 type ExplorerTableProps = {
   busyOverlay?: ExplorerBusyOverlay
   className?: string
+  liveUpdates?: Record<string, DirectoryProgressUpdateDto>
   volumes: DriveDto[]
   listing?: DirectoryListingDto
   loadingPath?: string
@@ -62,6 +94,7 @@ type ExplorerTableProps = {
 export function ExplorerTable({
   busyOverlay,
   className,
+  liveUpdates,
   volumes,
   listing,
   loadingPath,
@@ -72,74 +105,85 @@ export function ExplorerTable({
   onSelectionAnchorChange,
   onSelectionChange,
 }: ExplorerTableProps) {
-  const rowElementsRef = useRef(new Map<string, HTMLTableRowElement>())
+  const listRef = useRef<List | null>(null)
   const [sort, setSort] = useState<SortState>({ column: "size", direction: "desc" })
-  const rows = useMemo(() => {
+  const [scrollToIndex, setScrollToIndex] = useState<number>()
+  const rows = useMemo<ExplorerRow[]>(() => {
     return listing ? sortNodes(listing.children, sort) : sortVolumes(volumes, sort)
   }, [listing, sort, volumes])
-  const statusItems = useMemo(() => {
-    return listing
-      ? (rows as PathNodeDto[]).map(nodeToStatusItem)
-      : (rows as DriveDto[]).map(volumeToStatusItem)
-  }, [listing, rows])
-  const visibleItemIds = useMemo(() => {
-    return listing
-      ? (rows as PathNodeDto[]).map((node) => node.path)
-      : (rows as DriveDto[]).map((volume) => volume.id)
-  }, [listing, rows])
+  const rowCounts = useMemo(() => countRows(rows), [rows])
   const selectedItemSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds])
-  const selectedStatusItems = useMemo(() => {
-    return statusItems.filter((item) => selectedItemSet.has(item.id))
-  }, [selectedItemSet, statusItems])
-  const setRowElement = useCallback((itemId: string, element: HTMLTableRowElement | null) => {
-    if (element) {
-      rowElementsRef.current.set(itemId, element)
-      return
-    }
+  const selectedStatusItems = useMemo(
+    () => selectedStatusItemsForRows(rows, selectedItemIds, liveUpdates),
+    [liveUpdates, rows, selectedItemIds],
+  )
+  const sizeColumnWidth = useMemo(
+    () => calculateSizeColumnWidth(rows, loadingPath, liveUpdates),
+    [liveUpdates, loadingPath, rows],
+  )
+  const tableStyle = useMemo<ExplorerTableStyle>(
+    () => ({
+      "--explorer-size-column-width": `${sizeColumnWidth}px`,
+    }),
+    [sizeColumnWidth],
+  )
 
-    rowElementsRef.current.delete(itemId)
-  }, [])
+  useEffect(() => {
+    listRef.current?.forceUpdateGrid()
+  }, [liveUpdates, loadingPath, selectedItemIds])
 
   useEffect(() => {
     if (selectedItemIds.length === 0) {
+      setScrollToIndex(undefined)
       return
     }
 
-    const firstVisibleSelectedItemId = visibleItemIds.find((itemId) => selectedItemSet.has(itemId))
-    if (!firstVisibleSelectedItemId) {
-      return
-    }
+    const nextIndex = findFirstSelectedRowIndex(rows, selectedItemSet)
+    setScrollToIndex(nextIndex === -1 ? undefined : nextIndex)
+  }, [rows, selectedItemIds, selectedItemSet])
 
-    rowElementsRef.current.get(firstVisibleSelectedItemId)?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    })
-  }, [selectedItemIds, selectedItemSet, visibleItemIds])
+  const selectRow = useCallback(
+    (row: ExplorerRow, index: number, event: MouseEvent<HTMLElement>) => {
+      const itemId = rowId(row)
+      if (!isPathNode(row)) {
+        onSelectionChange(replaceSelection([itemId]))
+        onSelectionAnchorChange(itemId)
+        return
+      }
 
-  const selectRow = (itemId: string, event: MouseEvent<HTMLTableRowElement>) => {
-    if (!listing) {
+      if (event.shiftKey) {
+        onSelectionChange(rangeSelectionFromRows(rows, selectionAnchorId, index))
+        if (!selectionAnchorId) {
+          onSelectionAnchorChange(itemId)
+        }
+        return
+      }
+
+      if (isToggleSelectionInput(event)) {
+        onSelectionChange(toggleSelection(selectedItemIds, [itemId]))
+        onSelectionAnchorChange(itemId)
+        return
+      }
+
       onSelectionChange(replaceSelection([itemId]))
       onSelectionAnchorChange(itemId)
-      return
-    }
+    },
+    [onSelectionAnchorChange, onSelectionChange, rows, selectedItemIds, selectionAnchorId],
+  )
 
-    if (event.shiftKey) {
-      onSelectionChange(rangeSelection(visibleItemIds, selectionAnchorId, itemId))
-      if (!selectionAnchorId) {
-        onSelectionAnchorChange(itemId)
+  const openRow = useCallback(
+    (row: ExplorerRow) => {
+      if (isPathNode(row)) {
+        if (row.kind === "directory") {
+          onOpenNode(row)
+        }
+        return
       }
-      return
-    }
 
-    if (isToggleSelectionInput(event)) {
-      onSelectionChange(toggleSelection(selectedItemIds, [itemId]))
-      onSelectionAnchorChange(itemId)
-      return
-    }
-
-    onSelectionChange(replaceSelection([itemId]))
-    onSelectionAnchorChange(itemId)
-  }
+      onOpenVolume(row)
+    },
+    [onOpenNode, onOpenVolume],
+  )
 
   const clearSelectionOnEmptyListClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target instanceof Element && event.target.closest(EXPLORER_ROW_SELECTOR)) {
@@ -161,13 +205,63 @@ export function ExplorerTable({
     }))
   }
 
+  const handleRowsRendered = useCallback(
+    ({ startIndex, stopIndex }: RowsRenderedRange) => {
+      if (scrollToIndex === undefined) {
+        return
+      }
+
+      if (scrollToIndex >= startIndex && scrollToIndex <= stopIndex) {
+        setScrollToIndex(undefined)
+      }
+    },
+    [scrollToIndex],
+  )
+
+  const renderRow = useCallback(
+    ({ index, key, style }: ListRowProps) => {
+      const row = rows[index]
+      if (!row) {
+        return null
+      }
+
+      const selected = selectedItemSet.has(rowId(row))
+
+      return (
+        <div
+          aria-selected={selected}
+          className={selectableRowClassName(
+            !isPathNode(row) || row.kind === "directory" ? "cursor-pointer select-none" : "select-none",
+            selected,
+          )}
+          data-explorer-row
+          key={key}
+          role="row"
+          style={style}
+          title={rowTitle(row)}
+          onClick={(event) => selectRow(row, index, event)}
+          onDoubleClick={() => openRow(row)}
+        >
+          <div className="flex h-full min-w-0 items-center overflow-hidden whitespace-nowrap px-3">
+            <NameCell row={row} />
+          </div>
+          <div className="flex h-full items-center justify-end whitespace-nowrap px-3 text-right tabular-nums">
+            {isPathNode(row) ? renderNodeSize(row, loadingPath, liveUpdates?.[row.path]) : formatBytes(row.usedSpace)}
+          </div>
+        </div>
+      )
+    },
+    [liveUpdates, loadingPath, openRow, rows, selectRow, selectedItemSet],
+  )
+
   return (
     <div
       aria-busy={Boolean(busyOverlay)}
-      className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border", className)}
+      className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border text-xs", className)}
+      style={tableStyle}
     >
       <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", busyOverlay && "opacity-[0.15]")}>
-        <Table className="block w-full">
+        <Table className="block w-full text-xs">
           <TableHeader className="block">
             <TableRow className={tableRowClassName("hover:bg-transparent")}>
               <SortableHead column="name" sort={sort} onSort={toggleSort} className="min-w-0">
@@ -179,86 +273,68 @@ export function ExplorerTable({
             </TableRow>
           </TableHeader>
         </Table>
-        <div
-          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none"
-          onClick={clearSelectionOnEmptyListClick}
-        >
-          <Table className="block w-full">
-            <TableBody className="block">
-              {!listing
-                ? (rows as DriveDto[]).map((volume) => {
-                    const selected = selectedItemSet.has(volume.id)
+        <div className="min-h-0 flex-1 overflow-hidden overscroll-none" onClick={clearSelectionOnEmptyListClick}>
+          <AutoSizer>
+            {({ height, width }) => {
+              if (height <= 0 || width <= 0) {
+                return null
+              }
 
-                    return (
-                      <TableRow
-                        aria-selected={selected}
-                        className={selectableRowClassName("cursor-pointer select-none", selected)}
-                        data-explorer-row
-                        key={volume.id}
-                        ref={(element) => setRowElement(volume.id, element)}
-                        onClick={(event) => selectRow(volume.id, event)}
-                        onDoubleClick={() => onOpenVolume(volume)}
-                      >
-                        <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
-                          <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                            <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
-                            <span className="truncate" title={volume.label}>
-                              {volume.label}
-                            </span>
-                          </span>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right">{formatBytes(volume.usedSpace)}</TableCell>
-                      </TableRow>
-                    )
-                  })
-                : (rows as PathNodeDto[]).map((node) => {
-                    const selected = selectedItemSet.has(node.path)
-
-                    return (
-                      <TableRow
-                        aria-selected={selected}
-                        className={selectableRowClassName(
-                          node.kind === "directory" ? "cursor-pointer select-none" : "select-none",
-                          selected,
-                        )}
-                        data-explorer-row
-                        key={node.path}
-                        ref={(element) => setRowElement(node.path, element)}
-                        title={node.deleteSafety?.reason}
-                        onClick={(event) => selectRow(node.path, event)}
-                        onDoubleClick={() => {
-                          if (node.kind === "directory") onOpenNode(node)
-                        }}
-                      >
-                        <TableCell className="min-w-0 overflow-hidden whitespace-nowrap">
-                          <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                            {node.kind === "directory" ? (
-                              <Folder
-                                data-icon="inline-start"
-                                className={cn(ROW_ICON_CLASS, safetyIconClass(node.deleteSafety?.classification))}
-                              />
-                            ) : (
-                              <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
-                            )}
-                            <span
-                              className={cn("truncate", node.kind === "directory" && safetyTextClass(node.deleteSafety?.classification))}
-                              title={node.deleteSafety?.reason ? `${node.name} - ${node.deleteSafety.reason}` : node.name}
-                            >
-                              {node.name}
-                            </span>
-                          </span>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right">{renderNodeSize(node, loadingPath)}</TableCell>
-                      </TableRow>
-                    )
-                  })}
-            </TableBody>
-          </Table>
+              return (
+                <List
+                  aria-label="File explorer"
+                  className="outline-none"
+                  height={height}
+                  noRowsRenderer={renderNoRows}
+                  overscanRowCount={OVERSCAN_ROW_COUNT}
+                  ref={listRef}
+                  rowCount={rows.length}
+                  rowHeight={ROW_HEIGHT}
+                  rowRenderer={renderRow}
+                  scrollToAlignment="auto"
+                  scrollToIndex={scrollToIndex ?? -1}
+                  style={{ overflowX: "hidden", overscrollBehavior: "none" }}
+                  tabIndex={0}
+                  width={width}
+                  onRowsRendered={handleRowsRendered}
+                />
+              )
+            }}
+          </AutoSizer>
         </div>
-        <ExplorerStatusBar listing={listing} rows={statusItems} selectedRows={selectedStatusItems} />
+        <ExplorerStatusBar listing={listing} rowCounts={rowCounts} selectedRows={selectedStatusItems} />
       </div>
       {busyOverlay ? <TableBusyOverlay overlay={busyOverlay} /> : null}
     </div>
+  )
+}
+
+function NameCell({ row }: { row: ExplorerRow }) {
+  if (!isPathNode(row)) {
+    return (
+      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+        <HardDrive data-icon="inline-start" className={ROW_ICON_CLASS} />
+        <span className="truncate" title={row.label}>
+          {row.label}
+        </span>
+      </span>
+    )
+  }
+
+  return (
+    <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+      {row.kind === "directory" ? (
+        <Folder data-icon="inline-start" className={cn(ROW_ICON_CLASS, safetyIconClass(row.deleteSafety?.classification))} />
+      ) : (
+        <FileIcon data-icon="inline-start" className={cn(ROW_ICON_CLASS, "opacity-50")} />
+      )}
+      <span
+        className={cn("truncate", row.kind === "directory" && safetyTextClass(row.deleteSafety?.classification))}
+        title={row.deleteSafety?.reason ? `${row.name} - ${row.deleteSafety.reason}` : row.name}
+      >
+        {row.name}
+      </span>
+    </span>
   )
 }
 
@@ -278,11 +354,11 @@ function TableBusyOverlay({ overlay }: { overlay: ExplorerBusyOverlay }) {
 
 function ExplorerStatusBar({
   listing,
-  rows,
+  rowCounts,
   selectedRows,
 }: {
   listing?: DirectoryListingDto
-  rows: StatusItem[]
+  rowCounts: RowCounts
   selectedRows: StatusItem[]
 }) {
   const selected = selectedRows[0]
@@ -308,14 +384,12 @@ function ExplorerStatusBar({
             </span>
           </>
         ) : (
-          <span className="text-muted-foreground">{formatCount(rows.length, "Volume")}</span>
+          <span className="text-muted-foreground">{formatCount(rowCounts.volumes, "Volume")}</span>
         )}
       </div>
     )
   }
 
-  const directoryCount = rows.filter((row) => row.kind === "directory").length
-  const fileCount = rows.filter((row) => row.kind === "file").length
   const totalSelectedSize = selectedRows.reduce((total, row) => total + row.size, 0)
   const canDeleteSelection = selectedRows.every((row) => row.canDeleteNow !== false)
   const canPreviewSelection = selectedRows.length === 1 && selected?.kind === "file"
@@ -334,7 +408,7 @@ function ExplorerStatusBar({
     <div className="flex min-h-9 items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
       <span className="min-w-0 truncate">
         {selectedRows.length === 0
-          ? `${formatCount(directoryCount, "Directory")}, ${formatCount(fileCount, "File")}`
+          ? `${formatCount(rowCounts.directories, "Directory")}, ${formatCount(rowCounts.files, "File")}`
           : selectedRows.length === 1 && selected
             ? `${selected.label} (${formatBytes(selected.size)})`
             : `${formatCount(selectedRows.length, "item")} selected (${formatBytes(totalSelectedSize)})`}
@@ -372,6 +446,52 @@ function ExplorerStatusBar({
   )
 }
 
+function countRows(rows: ExplorerRow[]): RowCounts {
+  let directories = 0
+  let files = 0
+  let volumes = 0
+
+  for (const row of rows) {
+    if (!isPathNode(row)) {
+      volumes += 1
+    } else if (row.kind === "directory") {
+      directories += 1
+    } else if (row.kind === "file") {
+      files += 1
+    }
+  }
+
+  return { directories, files, volumes }
+}
+
+function selectedStatusItemsForRows(
+  rows: ExplorerRow[],
+  selectedItemIds: string[],
+  liveUpdates?: Record<string, DirectoryProgressUpdateDto>,
+) {
+  if (selectedItemIds.length === 0) {
+    return []
+  }
+
+  if (selectedItemIds.length > 32) {
+    const selected = new Set(selectedItemIds)
+    return rows.filter((row) => selected.has(rowId(row))).map((row) => rowToStatusItem(row, liveUpdates))
+  }
+
+  return selectedItemIds.flatMap((itemId) => {
+    const row = rows[findRowIndexById(rows, itemId)]
+    return row ? [rowToStatusItem(row, liveUpdates)] : []
+  })
+}
+
+function rowToStatusItem(row: ExplorerRow, liveUpdates?: Record<string, DirectoryProgressUpdateDto>): StatusItem {
+  if (isPathNode(row)) {
+    return nodeToStatusItem(row, liveUpdates?.[row.path])
+  }
+
+  return volumeToStatusItem(row)
+}
+
 function volumeToStatusItem(volume: DriveDto): StatusItem {
   return {
     id: volume.id,
@@ -386,16 +506,65 @@ function volumeToStatusItem(volume: DriveDto): StatusItem {
   }
 }
 
-function nodeToStatusItem(node: PathNodeDto): StatusItem {
+function nodeToStatusItem(node: PathNodeDto, update?: DirectoryProgressUpdateDto): StatusItem {
   return {
     id: node.path,
     label: node.name,
     kind: node.kind,
-    size: node.logicalSize,
+    size: update?.logicalSize ?? node.logicalSize,
     mountPoint: node.path,
     path: node.path,
     canDeleteNow: node.deleteSafety?.canDeleteNow,
   }
+}
+
+function rangeSelectionFromRows(rows: ExplorerRow[], anchorItemId: string | null, targetIndex: number) {
+  const target = rows[targetIndex]
+  const anchorIndex = anchorItemId ? findRowIndexById(rows, anchorItemId) : -1
+
+  if (!target || anchorIndex === -1) {
+    return target ? [rowId(target)] : []
+  }
+
+  const start = Math.min(anchorIndex, targetIndex)
+  const end = Math.max(anchorIndex, targetIndex)
+  return rows.slice(start, end + 1).map(rowId)
+}
+
+function findFirstSelectedRowIndex(rows: ExplorerRow[], selectedItemSet: Set<string>) {
+  if (selectedItemSet.size === 0) {
+    return -1
+  }
+
+  for (let index = 0; index < rows.length; index += 1) {
+    if (selectedItemSet.has(rowId(rows[index]))) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function findRowIndexById(rows: ExplorerRow[], itemId: string) {
+  for (let index = 0; index < rows.length; index += 1) {
+    if (rowId(rows[index]) === itemId) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function rowId(row: ExplorerRow) {
+  return isPathNode(row) ? row.path : row.id
+}
+
+function rowTitle(row: ExplorerRow) {
+  return isPathNode(row) ? row.deleteSafety?.reason : undefined
+}
+
+function isPathNode(row: ExplorerRow): row is PathNodeDto {
+  return "childrenKnown" in row
 }
 
 function formatCount(count: number, noun: string) {
@@ -409,44 +578,86 @@ function formatCount(count: number, noun: string) {
 
 function noopAction() {}
 
+function calculateSizeColumnWidth(
+  rows: ExplorerRow[],
+  loadingPath?: string,
+  liveUpdates?: Record<string, DirectoryProgressUpdateDto>,
+) {
+  let maxContentWidth =
+    measureSizeColumnText("Size", SIZE_COLUMN_HEADER_FONT) + SIZE_COLUMN_SORT_AFFORDANCE_WIDTH
+
+  for (const row of rows) {
+    maxContentWidth = Math.max(maxContentWidth, measureSizeLabelWidth(row, loadingPath, liveUpdates))
+  }
+
+  return clamp(
+    Math.ceil(maxContentWidth + SIZE_COLUMN_HORIZONTAL_PADDING),
+    SIZE_COLUMN_MIN_WIDTH,
+    SIZE_COLUMN_MAX_WIDTH,
+  )
+}
+
+function measureSizeLabelWidth(
+  row: ExplorerRow,
+  loadingPath?: string,
+  liveUpdates?: Record<string, DirectoryProgressUpdateDto>,
+) {
+  if (!isPathNode(row)) {
+    return measureSizeColumnText(formatBytes(row.usedSpace), SIZE_COLUMN_TEXT_FONT)
+  }
+
+  const update = liveUpdates?.[row.path]
+  const state = update?.state ?? row.state
+  const logicalSize = update?.logicalSize ?? row.logicalSize
+
+  if ((isWorking(state) || loadingPath === row.path) && logicalSize <= 0) {
+    return SIZE_COLUMN_SPINNER_WIDTH
+  }
+
+  if (state !== "complete" && logicalSize <= 0) {
+    return 0
+  }
+
+  return measureSizeColumnText(formatBytes(logicalSize), SIZE_COLUMN_TEXT_FONT)
+}
+
+let sizeColumnMeasureContext: CanvasRenderingContext2D | null | undefined
+
+function measureSizeColumnText(text: string, font: string) {
+  const context = getSizeColumnMeasureContext()
+
+  if (!context) {
+    return text.length * SIZE_COLUMN_FALLBACK_CHAR_WIDTH
+  }
+
+  context.font = font
+  return context.measureText(text).width
+}
+
+function getSizeColumnMeasureContext() {
+  if (sizeColumnMeasureContext !== undefined) {
+    return sizeColumnMeasureContext
+  }
+
+  if (typeof document === "undefined") {
+    sizeColumnMeasureContext = null
+    return sizeColumnMeasureContext
+  }
+
+  sizeColumnMeasureContext = document.createElement("canvas").getContext("2d")
+  return sizeColumnMeasureContext
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
 function tableRowClassName(className?: string) {
-  return cn("grid grid-cols-[minmax(0,1fr)_max-content]", className)
+  return cn("grid grid-cols-[minmax(0,1fr)_var(--explorer-size-column-width)]", className)
 }
 
 function selectableRowClassName(className: string, selected: boolean) {
   return tableRowClassName(cn(className, selected && "bg-muted/50 hover:bg-muted/50"))
-}
-
-function safetyTextClass(classification?: DeleteSafetyClassification) {
-  switch (classification) {
-    case "protected_system":
-      return "text-destructive"
-    case "not_deletable_now":
-      return "text-chart-1"
-    case "review_required":
-      return "text-muted-foreground"
-    case "safe_junk":
-      return "text-chart-2"
-    case "user_content":
-    default:
-      return undefined
-  }
-}
-
-function safetyIconClass(classification?: DeleteSafetyClassification) {
-  switch (classification) {
-    case "protected_system":
-      return "text-destructive"
-    case "not_deletable_now":
-      return "text-chart-1"
-    case "review_required":
-      return "text-muted-foreground"
-    case "safe_junk":
-      return "text-chart-2"
-    case "user_content":
-    default:
-      return undefined
-  }
 }
 
 type SortableHeadProps = {
@@ -486,6 +697,38 @@ function SortableHead({ align = "left", children, className, column, onSort, sor
       </span>
     </TableHead>
   )
+}
+
+function safetyTextClass(classification?: DeleteSafetyClassification) {
+  switch (classification) {
+    case "protected_system":
+      return "text-destructive"
+    case "not_deletable_now":
+      return "text-chart-1"
+    case "review_required":
+      return "text-muted-foreground"
+    case "safe_junk":
+      return "text-chart-2"
+    case "user_content":
+    default:
+      return undefined
+  }
+}
+
+function safetyIconClass(classification?: DeleteSafetyClassification) {
+  switch (classification) {
+    case "protected_system":
+      return "text-destructive"
+    case "not_deletable_now":
+      return "text-chart-1"
+    case "review_required":
+      return "text-muted-foreground"
+    case "safe_junk":
+      return "text-chart-2"
+    case "user_content":
+    default:
+      return undefined
+  }
 }
 
 function isWorking(state: string) {
@@ -542,10 +785,13 @@ function compareSizeValues(
   return left.value - right.value
 }
 
-function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
-  if (isWorking(node.state) || loadingPath === node.path) {
-    if (node.logicalSize > 0) {
-      return formatBytes(node.logicalSize)
+function renderNodeSize(node: PathNodeDto, loadingPath?: string, update?: DirectoryProgressUpdateDto) {
+  const state = update?.state ?? node.state
+  const logicalSize = update?.logicalSize ?? node.logicalSize
+
+  if (isWorking(state) || loadingPath === node.path) {
+    if (logicalSize > 0) {
+      return formatBytes(logicalSize)
     }
 
     return (
@@ -555,8 +801,12 @@ function renderNodeSize(node: PathNodeDto, loadingPath?: string) {
     )
   }
 
-  if (node.state !== "complete") return ""
-  return formatBytes(node.logicalSize)
+  if (state !== "complete") return ""
+  return formatBytes(logicalSize)
+}
+
+function renderNoRows() {
+  return <div className="flex h-full items-center px-3 text-xs text-muted-foreground">No items</div>
 }
 
 function formatBytes(bytes: number) {

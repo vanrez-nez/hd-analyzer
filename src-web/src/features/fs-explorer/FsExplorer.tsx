@@ -65,33 +65,8 @@ export function FsExplorer({
     () => (currentPath ? getCachedListing(cache, currentPath) : undefined),
     [cache, currentPath],
   )
-  const displayListing = useMemo(() => {
-    if (!listing) {
-      return undefined
-    }
-
-    const updates = liveUpdates[listing.path]
-    if (!updates) {
-      return listing
-    }
-
-    return {
-      ...listing,
-      children: listing.children.map((node) => {
-        const update = updates[node.path]
-        if (!update) {
-          return node
-        }
-
-        return {
-          ...node,
-          size: update.size,
-          logicalSize: update.logicalSize,
-          state: update.state,
-        }
-      }),
-    }
-  }, [listing, liveUpdates])
+  const listingLiveUpdates = listing ? liveUpdates[listing.path] : undefined
+  const visualizerLiveUpdates = visualizerOpen ? listingLiveUpdates : undefined
   const canReloadCurrentPath = Boolean(selectedVolume && currentPath)
   const isNavigationPending = Boolean(pendingNavigation)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
@@ -118,14 +93,16 @@ export function FsExplorer({
       return
     }
 
-    const items = displayListing ? displayListing.children.filter((node) => node.visible).map(nodeToVisualizerItem) : []
+    const items = listing
+      ? listing.children.filter((node) => node.visible).map((node) => nodeToVisualizerItem(node, visualizerLiveUpdates?.[node.path]))
+      : []
     onVisualizerSnapshotChange({
       path: currentPath,
       parentPath: selectedVolume ? getVisualizerParentPath(currentPath, selectedVolume.mountPoint) : null,
       items,
       generation: createVisualizerGeneration(currentPath, items),
     })
-  }, [currentPath, displayListing, onVisualizerSnapshotChange, selectedVolume, volumes])
+  }, [currentPath, listing, onVisualizerSnapshotChange, selectedVolume, visualizerLiveUpdates, volumes])
 
   const mergeListing = useCallback((listing: DirectoryListingDto) => {
     setCache((cache) => putCachedListing(cache, listing))
@@ -371,7 +348,8 @@ export function FsExplorer({
       <ExplorerTable
         className={tableClassName}
         volumes={volumes}
-        listing={displayListing}
+        listing={listing}
+        liveUpdates={listingLiveUpdates}
         loadingPath={loadingPath}
         busyOverlay={pendingNavigation}
         selectedItemIds={selectedItemIds}
@@ -408,14 +386,14 @@ function volumeToVisualizerItem(volume: DriveDto): VisualizerCellInput {
   }
 }
 
-function nodeToVisualizerItem(node: PathNodeDto): VisualizerCellInput {
+function nodeToVisualizerItem(node: PathNodeDto, update?: DirectoryProgressUpdateDto): VisualizerCellInput {
   return {
     id: node.path,
     label: node.name,
     path: node.path,
     kind: node.kind,
-    size: Math.max(0, node.logicalSize),
-    state: node.state,
+    size: Math.max(0, update?.logicalSize ?? node.logicalSize),
+    state: update?.state ?? node.state,
   }
 }
 
