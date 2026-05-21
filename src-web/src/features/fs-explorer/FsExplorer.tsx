@@ -5,7 +5,6 @@ import { fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { Spinner } from "@/components/ui/spinner"
 import { ExplorerTable } from "./ExplorerTable"
 import { PathButtonGroup } from "./PathButtonGroup"
 import { createExplorerCache, getCachedListing, putCachedListing } from "./cache"
@@ -324,11 +323,7 @@ export function FsExplorer({
               disabled={isReloadingCurrentPath || isNavigationPending}
               onClick={() => void reloadCurrentPath()}
             >
-              {isReloadingCurrentPath ? (
-                <Spinner />
-              ) : (
-                <RefreshCwIcon data-icon="inline-start" />
-              )}
+              <RefreshCwIcon data-icon="inline-start" />
             </Button>
           ) : null}
           <Button
