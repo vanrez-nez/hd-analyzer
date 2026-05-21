@@ -95,9 +95,6 @@ export function Visualizer({
           onExplorerSelectionAnchorChange(nextSelection[0] ?? null)
         }}
       />
-      <div className="pointer-events-none absolute right-2 top-2 text-xs tabular-nums text-muted-foreground">
-        0 FPS
-      </div>
     </div>
   )
 }
@@ -157,7 +154,6 @@ function prepareVisualizer(
   const layout = voronoiRef.current.getLayout(snapshot, colorScheme)
   return {
     context,
-    devicePixelRatio,
     layout,
     paddingLeft,
     paddingTop,

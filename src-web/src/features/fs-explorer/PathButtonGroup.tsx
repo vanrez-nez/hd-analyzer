@@ -1,3 +1,4 @@
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -24,6 +25,24 @@ export function PathButtonGroup({
   onNavigate,
   onBackToRoot,
 }: PathButtonGroupProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [showLeftFade, setShowLeftFade] = useState(false)
+  const updateLeftFade = useCallback(() => {
+    const scrollElement = scrollRef.current
+    setShowLeftFade(Boolean(scrollElement && scrollElement.scrollLeft > 0))
+  }, [])
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef.current
+    if (!scrollElement) {
+      setShowLeftFade(false)
+      return
+    }
+
+    scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
+    updateLeftFade()
+  }, [path, rootLabel, rootPath, updateLeftFade])
+
   if (!path || !rootPath || !rootLabel) {
     return null
   }
@@ -32,7 +51,7 @@ export function PathButtonGroup({
   const backPath = getBackPath(path, rootPath)
 
   return (
-    <ButtonGroup className="max-w-full overflow-hidden" aria-label="Path navigation">
+    <ButtonGroup className="w-full max-w-full gap-2 overflow-hidden" aria-label="Path navigation">
       <ButtonGroup>
         <Button
           type="button"
@@ -51,22 +70,33 @@ export function PathButtonGroup({
           <ArrowLeftIcon data-icon="inline-start" />
         </Button>
       </ButtonGroup>
-      <ButtonGroup className="min-w-0 max-w-full overflow-hidden">
-        {parts.map((part) => (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="min-w-0 max-w-none"
-            disabled={disabled}
-            key={part.path}
-            title={part.label}
-            onClick={() => onNavigate(part.path)}
-          >
-            {truncateMiddle(part.label, labelMaxLength)}
-          </Button>
-        ))}
-      </ButtonGroup>
+      <div className="relative min-w-0 flex-1 overflow-hidden">
+        <div
+          ref={scrollRef}
+          className="scrollbar-hidden min-w-0 max-w-full overflow-x-auto overflow-y-hidden"
+          onScroll={updateLeftFade}
+        >
+          <ButtonGroup className="min-w-max">
+            {parts.map((part) => (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-w-0 max-w-none"
+                disabled={disabled}
+                key={part.path}
+                title={part.label}
+                onClick={() => onNavigate(part.path)}
+              >
+                {truncateMiddle(part.label, labelMaxLength)}
+              </Button>
+            ))}
+          </ButtonGroup>
+        </div>
+        {showLeftFade ? (
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent" />
+        ) : null}
+      </div>
     </ButtonGroup>
   )
 }
