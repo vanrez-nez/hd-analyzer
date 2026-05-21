@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { PanelRightOpenIcon, RefreshCwIcon } from "lucide-react"
+import { PanelRightOpenIcon, RefreshCwIcon, ShieldCheck } from "lucide-react"
 
 import { fsListVolumes, fsOpenPathWithProgress, fsStartScan } from "@/api"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -29,10 +29,12 @@ type PendingNavigation = {
 
 type FsExplorerProps = {
   explorerSelectionAnchorId: string | null
+  permissionChecking: boolean
   selectedItemIds: string[]
   tableClassName?: string
   visualizerOpen: boolean
   onExplorerSelectionAnchorChange: (itemId: string | null) => void
+  onRequestPermissions: () => void
   onSelectionChange: (itemIds: string[]) => void
   onVisualizerToggle: () => void
   onVisualizerSnapshotChange?: (snapshot: VisualizerLevelSnapshot) => void
@@ -40,10 +42,12 @@ type FsExplorerProps = {
 
 export function FsExplorer({
   explorerSelectionAnchorId,
+  permissionChecking,
   selectedItemIds,
   tableClassName,
   visualizerOpen,
   onExplorerSelectionAnchorChange,
+  onRequestPermissions,
   onSelectionChange,
   onVisualizerToggle,
   onVisualizerSnapshotChange,
@@ -69,6 +73,7 @@ export function FsExplorer({
   const canReloadCurrentPath = Boolean(selectedVolume && currentPath)
   const isNavigationPending = Boolean(pendingNavigation)
   const isReloadingCurrentPath = Boolean(currentPath && loadingPath === currentPath)
+  const isVolumesLevel = !currentPath
 
   useEffect(() => {
     fsListVolumes()
@@ -303,6 +308,18 @@ export function FsExplorer({
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       <div className="flex min-h-8 items-center gap-2 overflow-hidden">
+        {isVolumesLevel ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={permissionChecking}
+            onClick={onRequestPermissions}
+          >
+            <ShieldCheck data-icon="inline-start" />
+            Permissions
+          </Button>
+        ) : null}
         <div className="min-w-0 flex-1 overflow-hidden">
           <PathButtonGroup
             path={currentPath}

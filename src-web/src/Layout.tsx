@@ -25,9 +25,11 @@ const SPLIT_ANIMATION_MS = 180
 
 type LayoutProps = {
   colorScheme: ColorScheme
+  permissionChecking: boolean
+  onRequestPermissions: () => void
 }
 
-export function Layout({ colorScheme }: LayoutProps) {
+export function Layout({ colorScheme, permissionChecking, onRequestPermissions }: LayoutProps) {
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
   const [explorerSelectionAnchorId, setExplorerSelectionAnchorId] = useState<string | null>(null)
   const [splitOpen, setSplitOpen] = useState(false)
@@ -150,9 +152,11 @@ export function Layout({ colorScheme }: LayoutProps) {
       >
         <FsExplorer
           explorerSelectionAnchorId={explorerSelectionAnchorId}
+          permissionChecking={permissionChecking}
           selectedItemIds={selectedItemIds}
           visualizerOpen={splitOpen}
           onExplorerSelectionAnchorChange={setExplorerSelectionAnchorId}
+          onRequestPermissions={onRequestPermissions}
           onSelectionChange={setSelectedItemIds}
           onVisualizerToggle={handleVisualizerToggle}
           onVisualizerSnapshotChange={handleVisualizerSnapshotChange}
