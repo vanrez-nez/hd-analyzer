@@ -130,6 +130,22 @@ export async function openItemLocation(paths: string[]): Promise<void> {
   }
 }
 
+export async function openFolder(path: string): Promise<void> {
+  const folderPath = path.trim()
+  if (folderPath.length === 0) {
+    return
+  }
+
+  await appLog.info("open folder started", { path: folderPath })
+  try {
+    await invokeLogged<void>("fs_open_folder", { path: folderPath })
+    await appLog.info("open folder completed", { path: folderPath })
+  } catch (error) {
+    await appLog.error("open folder failed", { error, path: folderPath })
+    throw error
+  }
+}
+
 export async function previewItem(path: string): Promise<void> {
   const previewPath = path.trim()
   if (previewPath.length === 0) {

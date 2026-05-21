@@ -74,7 +74,7 @@ export function Visualizer({
     <div ref={wrapperRef} className="relative h-full w-full overflow-hidden">
       <canvas
         ref={canvasRef}
-        className="absolute left-1/2 top-1/2 block -translate-x-1/2 -translate-y-1/2"
+        className="absolute left-1/2 top-1/2 block -translate-x-1/2 -translate-y-1/2 p-16"
         aria-label="Visualizer canvas"
         onClick={(event) => {
           const cell = selectedCellAtPoint(

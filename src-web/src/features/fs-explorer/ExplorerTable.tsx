@@ -15,7 +15,7 @@ import List, { type ListRowProps } from "react-virtualized/dist/es/List"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { openItemLocation, previewItem } from "@/api"
+import { openFolder, openItemLocation, previewItem } from "@/api"
 import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
 import type {
@@ -366,7 +366,7 @@ function ExplorerStatusBar({
 
   if (isRootVolumes) {
     return (
-      <div className="flex min-h-9 items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
+      <div className="flex min-h-9 select-none items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
         {selected ? (
           <>
             <span className="min-w-0 truncate font-medium" title={selected.label}>
@@ -393,7 +393,13 @@ function ExplorerStatusBar({
   const totalSelectedSize = selectedRows.reduce((total, row) => total + row.size, 0)
   const canDeleteSelection = selectedRows.every((row) => row.canDeleteNow !== false)
   const canPreviewSelection = selectedRows.length === 1 && selected?.kind === "file"
+  const openLocationLabel = selectedRows.length > 0 ? "Open selected item location" : "Open current folder location"
   const handleOpenLocation = () => {
+    if (selectedRows.length === 0) {
+      void openFolder(listing.path).catch(() => undefined)
+      return
+    }
+
     void openItemLocation(selectedRows.map((row) => row.path)).catch(() => undefined)
   }
   const handlePreview = () => {
@@ -405,7 +411,7 @@ function ExplorerStatusBar({
   }
 
   return (
-    <div className="flex min-h-9 items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
+    <div className="flex min-h-9 select-none items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
       <span className="min-w-0 truncate">
         {selectedRows.length === 0
           ? `${formatCount(rowCounts.directories, "Directory")}, ${formatCount(rowCounts.files, "File")}`
@@ -413,8 +419,8 @@ function ExplorerStatusBar({
             ? `${selected.label} (${formatBytes(selected.size)})`
             : `${formatCount(selectedRows.length, "item")} selected (${formatBytes(totalSelectedSize)})`}
       </span>
-      {selectedRows.length > 0 ? (
-        <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
+        {selectedRows.length > 0 ? (
           <Button
             type="button"
             variant="ghost"
@@ -425,23 +431,23 @@ function ExplorerStatusBar({
           >
             <Trash2Icon data-icon="inline-start" />
           </Button>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Open selected item location" onClick={handleOpenLocation}>
-            <FolderOpenIcon data-icon="inline-start" />
+        ) : null}
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={openLocationLabel} onClick={handleOpenLocation}>
+          <FolderOpenIcon data-icon="inline-start" />
+        </Button>
+        {selectedRows.length === 1 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Preview selected item"
+            disabled={!canPreviewSelection}
+            onClick={handlePreview}
+          >
+            <EyeIcon data-icon="inline-start" />
           </Button>
-          {selectedRows.length === 1 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Preview selected item"
-              disabled={!canPreviewSelection}
-              onClick={handlePreview}
-            >
-              <EyeIcon data-icon="inline-start" />
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -653,7 +659,7 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function tableRowClassName(className?: string) {
-  return cn("grid grid-cols-[minmax(0,1fr)_var(--explorer-size-column-width)]", className)
+  return cn("grid select-none grid-cols-[minmax(0,1fr)_var(--explorer-size-column-width)]", className)
 }
 
 function selectableRowClassName(className: string, selected: boolean) {

@@ -267,6 +267,28 @@ pub fn fs_reveal_items(paths: Vec<String>, app: AppHandle) -> Result<(), Command
 }
 
 #[tauri::command]
+pub fn fs_open_folder(path: String, app: AppHandle) -> Result<(), CommandError> {
+    let path = existing_absolute_path(&path)?;
+    if !path.is_dir() {
+        return Err(CommandError::new(
+            CommandErrorCode::OpenItemFailed,
+            format!("Path is not a folder: {}", path.display()),
+        ));
+    }
+
+    log::info!("opening filesystem folder {}", path.display());
+    app.opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|error| {
+            log::warn!("failed to open filesystem folder {}: {error}", path.display());
+            CommandError::new(
+                CommandErrorCode::OpenItemFailed,
+                format!("Failed to open {}: {error}", path.display()),
+            )
+        })
+}
+
+#[tauri::command]
 pub fn fs_preview_item(path: String, app: AppHandle) -> Result<(), CommandError> {
     let path = existing_absolute_path(&path)?;
     log::info!("previewing filesystem item {}", path.display());
