@@ -85,7 +85,12 @@ export function Visualizer({
             snapshotRef.current,
             colorSchemeRef.current,
           )
-          const nextSelection = selectionForCellClick(selectedItemIdsRef.current, cell, event)
+          const nextSelection = selectionForCellClick(
+            selectedItemIdsRef.current,
+            cell,
+            snapshotRef.current,
+            event,
+          )
           onSelectionChange(nextSelection)
           onExplorerSelectionAnchorChange(nextSelection[0] ?? null)
         }}
@@ -179,6 +184,7 @@ function selectedCellAtPoint(
 function selectionForCellClick(
   currentSelection: string[],
   cell: VisualizerLayoutCell | undefined,
+  snapshot: VisualizerLevelSnapshot,
   event: MouseEvent<HTMLCanvasElement>,
 ) {
   if (!cell) {
@@ -186,6 +192,10 @@ function selectionForCellClick(
   }
 
   const memberIds = cell.memberIds.length > 0 ? cell.memberIds : [cell.selectionId]
+  if (snapshot.path === null) {
+    return memberIds[0] ? replaceSelection([memberIds[0]]) : []
+  }
+
   if (isToggleSelectionInput(event)) {
     return toggleSelection(currentSelection, memberIds)
   }

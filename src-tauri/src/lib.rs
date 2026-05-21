@@ -26,6 +26,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_macos_permissions::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .setup(|_app| {
             log::info!("HD Analyzer Tauri runtime initialized");

@@ -20,3 +20,4 @@ serde_json.workspace = true
 tauri.workspace = true
 tauri-plugin-log = "2.8.0"
 tauri-plugin-macos-permissions = "2.3.0"
+tauri-plugin-opener = "2.5.4"

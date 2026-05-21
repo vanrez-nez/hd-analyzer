@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDownIcon, ArrowUpIcon, FileIcon, Folder, HardDrive } from "lucide-react"
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  EyeIcon,
+  FileIcon,
+  Folder,
+  FolderOpenIcon,
+  HardDrive,
+  Trash2Icon,
+} from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { openItemLocation } from "@/api"
 import { isToggleSelectionInput, rangeSelection, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
 import type { DeleteSafetyClassification, DirectoryListingDto, DriveDto, PathNodeDto } from "./types"
@@ -13,6 +24,18 @@ type SortDirection = "asc" | "desc"
 type SortState = {
   column: SortColumn
   direction: SortDirection
+}
+type StatusItem = {
+  canDeleteNow?: boolean
+  fileSystem?: string
+  id: string
+  kind: "volume" | PathNodeDto["kind"]
+  label: string
+  mountPoint?: string
+  path: string
+  size: number
+  totalSpace?: number
+  availableSpace?: number
 }
 
 const ROW_ICON_CLASS = "size-3.5 shrink-0"
@@ -48,12 +71,20 @@ export function ExplorerTable({
   const rows = useMemo(() => {
     return listing ? sortNodes(listing.children, sort) : sortVolumes(volumes, sort)
   }, [listing, sort, volumes])
+  const statusItems = useMemo(() => {
+    return listing
+      ? (rows as PathNodeDto[]).map(nodeToStatusItem)
+      : (rows as DriveDto[]).map(volumeToStatusItem)
+  }, [listing, rows])
   const visibleItemIds = useMemo(() => {
     return listing
       ? (rows as PathNodeDto[]).map((node) => node.path)
       : (rows as DriveDto[]).map((volume) => volume.id)
   }, [listing, rows])
   const selectedItemSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds])
+  const selectedStatusItems = useMemo(() => {
+    return statusItems.filter((item) => selectedItemSet.has(item.id))
+  }, [selectedItemSet, statusItems])
   const setRowElement = useCallback((itemId: string, element: HTMLTableRowElement | null) => {
     if (element) {
       rowElementsRef.current.set(itemId, element)
@@ -80,6 +111,12 @@ export function ExplorerTable({
   }, [selectedItemIds, selectedItemSet, visibleItemIds])
 
   const selectRow = (itemId: string, event: MouseEvent<HTMLTableRowElement>) => {
+    if (!listing) {
+      onSelectionChange(replaceSelection([itemId]))
+      onSelectionAnchorChange(itemId)
+      return
+    }
+
     if (event.shiftKey) {
       onSelectionChange(rangeSelection(visibleItemIds, selectionAnchorId, itemId))
       if (!selectionAnchorId) {
@@ -208,9 +245,128 @@ export function ExplorerTable({
           </TableBody>
         </Table>
       </div>
+      <ExplorerStatusBar listing={listing} rows={statusItems} selectedRows={selectedStatusItems} />
     </div>
   )
 }
+
+function ExplorerStatusBar({
+  listing,
+  rows,
+  selectedRows,
+}: {
+  listing?: DirectoryListingDto
+  rows: StatusItem[]
+  selectedRows: StatusItem[]
+}) {
+  const selected = selectedRows[0]
+  const isRootVolumes = !listing
+
+  if (isRootVolumes) {
+    return (
+      <div className="flex min-h-9 items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
+        {selected ? (
+          <>
+            <span className="min-w-0 truncate font-medium" title={selected.label}>
+              {selected.label}
+            </span>
+            <span className="flex min-w-0 items-center justify-end gap-3 text-muted-foreground">
+              <span className="whitespace-nowrap">Total {formatBytes(selected.totalSpace ?? 0)}</span>
+              <span className="whitespace-nowrap">Free {formatBytes(selected.availableSpace ?? 0)}</span>
+              <span className="max-w-24 truncate" title={selected.fileSystem}>
+                {selected.fileSystem || "Unknown FS"}
+              </span>
+              <span className="max-w-64 truncate" title={selected.mountPoint}>
+                {selected.mountPoint}
+              </span>
+            </span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">{formatCount(rows.length, "Volume")}</span>
+        )}
+      </div>
+    )
+  }
+
+  const directoryCount = rows.filter((row) => row.kind === "directory").length
+  const fileCount = rows.filter((row) => row.kind === "file").length
+  const totalSelectedSize = selectedRows.reduce((total, row) => total + row.size, 0)
+  const canDeleteSelection = selectedRows.every((row) => row.canDeleteNow !== false)
+  const handleOpenLocation = () => {
+    void openItemLocation(selectedRows.map((row) => row.path)).catch(() => undefined)
+  }
+
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-3 border-t bg-muted/50 px-3 text-xs">
+      <span className="min-w-0 truncate">
+        {selectedRows.length === 0
+          ? `${formatCount(directoryCount, "Directory")}, ${formatCount(fileCount, "File")}`
+          : selectedRows.length === 1 && selected
+            ? `${selected.label} (${formatBytes(selected.size)})`
+            : `${formatCount(selectedRows.length, "item")} selected (${formatBytes(totalSelectedSize)})`}
+      </span>
+      {selectedRows.length > 0 ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Delete selected items"
+            disabled={!canDeleteSelection}
+            onClick={noopAction}
+          >
+            <Trash2Icon data-icon="inline-start" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Open selected item location" onClick={handleOpenLocation}>
+            <FolderOpenIcon data-icon="inline-start" />
+          </Button>
+          {selectedRows.length === 1 ? (
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Preview selected item" onClick={noopAction}>
+              <EyeIcon data-icon="inline-start" />
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function volumeToStatusItem(volume: DriveDto): StatusItem {
+  return {
+    id: volume.id,
+    label: volume.label,
+    kind: "volume",
+    size: volume.usedSpace,
+    totalSpace: volume.totalSpace,
+    availableSpace: volume.availableSpace,
+    fileSystem: volume.fileSystem,
+    mountPoint: volume.mountPoint,
+    path: volume.mountPoint,
+  }
+}
+
+function nodeToStatusItem(node: PathNodeDto): StatusItem {
+  return {
+    id: node.path,
+    label: node.name,
+    kind: node.kind,
+    size: node.logicalSize,
+    mountPoint: node.path,
+    path: node.path,
+    canDeleteNow: node.deleteSafety?.canDeleteNow,
+  }
+}
+
+function formatCount(count: number, noun: string) {
+  if (count === 1) {
+    return `${count} ${noun}`
+  }
+
+  const plural = noun.endsWith("y") ? `${noun.slice(0, -1)}ies` : `${noun}s`
+  return `${count} ${plural}`
+}
+
+function noopAction() {}
 
 function tableRowClassName(className?: string) {
   return cn("grid grid-cols-[minmax(0,1fr)_max-content]", className)

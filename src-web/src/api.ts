@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { revealItemInDir } from "@tauri-apps/plugin-opener"
 import {
   checkFullDiskAccessPermission,
   requestFullDiskAccessPermission,
@@ -152,6 +153,22 @@ export async function fsInvalidatePath(path: string, volumeRoot: string): Promis
     volumeRoot,
     scope: "path_and_descendants",
   })
+}
+
+export async function openItemLocation(paths: string[]): Promise<void> {
+  const revealPaths = paths.filter((path) => path.trim().length > 0)
+  if (revealPaths.length === 0) {
+    return
+  }
+
+  await appLog.info("open item location started", { pathCount: revealPaths.length, paths: revealPaths })
+  try {
+    await revealItemInDir(revealPaths.length === 1 ? revealPaths[0] : revealPaths)
+    await appLog.info("open item location completed", { pathCount: revealPaths.length })
+  } catch (error) {
+    await appLog.error("open item location failed", { error, pathCount: revealPaths.length, paths: revealPaths })
+    throw error
+  }
 }
 
 async function invokeLogged<T>(command: string, args?: Record<string, unknown>): Promise<T> {
