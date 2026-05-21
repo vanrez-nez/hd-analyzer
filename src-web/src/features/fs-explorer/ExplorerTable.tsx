@@ -28,6 +28,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { openFolder, openItemLocation, openTerminal, previewItem } from "@/api"
 import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import { cn } from "@/lib/utils"
@@ -39,7 +40,7 @@ import type {
   DriveDto,
   PathNodeDto,
 } from "./types"
-import type { CSSProperties, MouseEvent } from "react"
+import type { CSSProperties, MouseEvent, ReactNode } from "react"
 
 type SortColumn = "name" | "size"
 type SortDirectionState = "asc" | "desc"
@@ -461,68 +462,89 @@ function ExplorerStatusBar({
             ? `${selected.label} (${formatBytes(selected.size)})`
             : `${formatCount(selectedRows.length, "item")} selected (${formatBytes(totalSelectedSize)})`}
       </span>
-      <div className="flex shrink-0 items-center gap-1">
-        {selectedRows.length > 0 ? (
-          <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Delete selected items"
-              disabled={!canDeleteSelection || isDeleting}
-              onClick={handleDeleteClick}
-            >
-              <Trash2Icon data-icon="inline-start" />
-            </Button>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{deleteDialogTitle}</AlertDialogTitle>
-                <AlertDialogDescription className="sr-only">
-                  Confirm deletion for the selected filesystem item(s).
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <div className="flex items-center justify-between gap-4">
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Switch checked={moveToTrash} disabled={isDeleting} onCheckedChange={setMoveToTrash} />
-                  <span>Move to trash</span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    className={buttonVariants({ variant: "destructive" })}
-                    disabled={isDeleting}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      void handleConfirmDelete()
-                    }}
-                  >
-                    Delete
-                  </AlertDialogAction>
+      <TooltipProvider delayDuration={250}>
+        <div className="flex shrink-0 items-center gap-1">
+          {selectedRows.length > 0 ? (
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <StatusActionTooltip label="Delete selected items">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete selected items"
+                  disabled={!canDeleteSelection || isDeleting}
+                  onClick={handleDeleteClick}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                </Button>
+              </StatusActionTooltip>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{deleteDialogTitle}</AlertDialogTitle>
+                  <AlertDialogDescription className="sr-only">
+                    Confirm deletion for the selected filesystem item(s).
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="flex items-center justify-between gap-4">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Switch checked={moveToTrash} disabled={isDeleting} onCheckedChange={setMoveToTrash} />
+                    <span>Move to trash</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className={buttonVariants({ variant: "destructive" })}
+                      disabled={isDeleting}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        void handleConfirmDelete()
+                      }}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </div>
                 </div>
-              </div>
-            </AlertDialogContent>
-          </AlertDialog>
-        ) : null}
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={openLocationLabel} onClick={handleOpenLocation}>
-          <FolderOpenIcon data-icon="inline-start" />
-        </Button>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="Open terminal in current folder" onClick={handleOpenTerminal}>
-          <SquareTerminalIcon data-icon="inline-start" />
-        </Button>
-        {selectedRows.length === 1 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Preview selected item"
-            disabled={!canPreviewSelection}
-            onClick={handlePreview}
-          >
-            <EyeIcon data-icon="inline-start" />
-          </Button>
-        ) : null}
-      </div>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : null}
+          <StatusActionTooltip label={openLocationLabel}>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={openLocationLabel} onClick={handleOpenLocation}>
+              <FolderOpenIcon data-icon="inline-start" />
+            </Button>
+          </StatusActionTooltip>
+          <StatusActionTooltip label="Open terminal in current folder">
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Open terminal in current folder" onClick={handleOpenTerminal}>
+              <SquareTerminalIcon data-icon="inline-start" />
+            </Button>
+          </StatusActionTooltip>
+          {selectedRows.length === 1 ? (
+            <StatusActionTooltip label="Preview selected item">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Preview selected item"
+                disabled={!canPreviewSelection}
+                onClick={handlePreview}
+              >
+                <EyeIcon data-icon="inline-start" />
+              </Button>
+            </StatusActionTooltip>
+          ) : null}
+        </div>
+      </TooltipProvider>
     </div>
+  )
+}
+
+function StatusActionTooltip({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
   )
 }
 

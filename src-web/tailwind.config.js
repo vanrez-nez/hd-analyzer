@@ -1,3 +1,5 @@
+import animate from "tailwindcss-animate"
+
 const color = (name) => `color-mix(in oklch, var(--${name}) calc(<alpha-value> * 100%), transparent)`
 
 /** @type {import('tailwindcss').Config} */
@@ -80,5 +82,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 }
