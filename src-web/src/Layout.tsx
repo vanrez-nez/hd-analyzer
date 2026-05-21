@@ -22,6 +22,7 @@ const DEFAULT_SPLIT_LAYOUT: SplitLayout = {
   visualizer: 70,
 }
 const SPLIT_ANIMATION_MS = 180
+const VISUALIZER_COLLAPSED_SIZE_THRESHOLD = 0.5
 const VISUALIZER_TOP_OFFSET_CLASS = "pt-11"
 
 type LayoutProps = {
@@ -46,8 +47,10 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
   const explorerPanelRef = useRef<PanelImperativeHandle | null>(null)
   const hasMountedRef = useRef(false)
   const ignoreLayoutChangeRef = useRef(false)
+  const skipNextCloseAnimationRef = useRef(false)
   const splitLayoutRef = useRef<SplitLayout>(DEFAULT_SPLIT_LAYOUT)
   const visualizerPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const resizeDisabled = !splitOpen && !splitAnimating
 
   const handleVisualizerSnapshotChange = useCallback((snapshot: VisualizerLevelSnapshot) => {
     setVisualizerSnapshot(snapshot)
@@ -73,6 +76,16 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
     }
 
     window.cancelAnimationFrame(animationFrameRef.current ?? 0)
+
+    if (!splitOpen && skipNextCloseAnimationRef.current) {
+      skipNextCloseAnimationRef.current = false
+      explorerPanel.resize("100%")
+      visualizerPanel.collapse()
+      ignoreLayoutChangeRef.current = false
+      setSplitAnimating(false)
+      return
+    }
+
     setSplitAnimating(true)
     ignoreLayoutChangeRef.current = true
 
@@ -125,13 +138,19 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
       direction="horizontal"
       className={cn("h-full min-h-0 flex-1", (splitOpen || splitAnimating) && "gap-2")}
       defaultLayout={splitLayout}
+      disabled={resizeDisabled}
       onLayoutChanged={(layout) => {
         if (
           ignoreLayoutChangeRef.current ||
           !splitOpen ||
-          layout.visualizer === undefined ||
-          layout.visualizer === 0
+          layout.visualizer === undefined
         ) {
+          return
+        }
+
+        if (layout.visualizer <= VISUALIZER_COLLAPSED_SIZE_THRESHOLD) {
+          skipNextCloseAnimationRef.current = true
+          setSplitOpen(false)
           return
         }
 
@@ -147,6 +166,7 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
       <ResizablePanel
         id="explorer"
         defaultSize="100%"
+        disabled={resizeDisabled}
         minSize="20%"
         panelRef={explorerPanelRef}
         className="flex min-h-0 min-w-0 overflow-hidden"
@@ -163,15 +183,15 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
           onVisualizerSnapshotChange={handleVisualizerSnapshotChange}
         />
       </ResizablePanel>
-      <ResizableHandle
-        withHandle
-        className={splitOpen && !splitAnimating ? "bg-transparent after:hidden" : "hidden"}
-      />
+      {splitOpen && !splitAnimating ? (
+        <ResizableHandle withHandle className="mx-2 w-[6px] bg-transparent after:hidden" />
+      ) : null}
       <ResizablePanel
         id="visualizer"
         collapsible
         collapsedSize="0%"
         defaultSize="0%"
+        disabled={resizeDisabled}
         minSize={splitAnimating || !splitOpen ? "0%" : "25%"}
         panelRef={visualizerPanelRef}
         className="min-h-0 min-w-0 overflow-hidden"
