@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/hd-analyzer-core",
+    "crates/space-lenser-core",
     "src-tauri",
 ]
 resolver = "2"

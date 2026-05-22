@@ -8,7 +8,7 @@
 
 ## Summary
 
-Migrate HD Analyzer from a terminal-first application into a Tauri v2 desktop application while
+Migrate Space Lenser from a terminal-first application into a Tauri v2 desktop application while
 preserving the current Rust filesystem scanner as the source of truth. The plan extracts scan,
 drive, category, path, and permission/error behavior into a reusable Rust core, adds a Tauri shell
 with typed IPC commands and scan progress streaming, and builds a shadcn/ui-based desktop UI for
@@ -83,7 +83,7 @@ specs/001-tauri-migration/
 ```text
 Cargo.toml               # Workspace root after migration
 crates/
-├── hd-analyzer-core/
+├── space-lenser-core/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs       # Public scanner/domain API
@@ -135,7 +135,7 @@ existing project and shadcn/ui's Vite setup.
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Terminal UX Is the Product | The requested feature changes HD Analyzer from terminal-first to Tauri desktop-first. | Keeping the terminal UI as the primary surface would not satisfy "use tauri instead of a cli backend". |
+| Terminal UX Is the Product | The requested feature changes Space Lenser from terminal-first to Tauri desktop-first. | Keeping the terminal UI as the primary surface would not satisfy "use tauri instead of a cli backend". |
 | Workspace split into core and Tauri app | Separates scanner behavior from desktop shell and keeps deterministic logic testable. | Directly embedding current scanner logic into `src-tauri` would couple scanner state and IPC, making progress streaming and regression tests harder. |
 | React frontend added for shadcn/ui | shadcn/ui's official Vite setup targets React + TypeScript and generated component files. | Staying with vanilla TypeScript would not satisfy the requested component system. |
 

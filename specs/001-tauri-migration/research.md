@@ -35,7 +35,7 @@ Sources:
 - https://ui.shadcn.com/docs/installation/vite
 - https://v2.tauri.app/start/create-project/
 
-## Decision: Extract scanner/domain logic into `crates/hd-analyzer-core`
+## Decision: Extract scanner/domain logic into `crates/space-lenser-core`
 
 **Rationale**: Existing `src/app.rs` mixes drive discovery, scan threading, progress aggregation,
 navigation state, category classification, and TUI-facing state. Tauri commands need reusable,

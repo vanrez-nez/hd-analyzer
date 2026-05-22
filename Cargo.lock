@@ -1619,41 +1619,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
-name = "hd-analyzer-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "core-foundation-sys",
- "humansize",
- "jwalk",
- "log",
- "nix",
- "objc2-foundation",
- "rayon",
- "serde",
- "sysinfo",
- "tempfile",
- "thiserror 2.0.18",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "hd-analyzer-tauri"
-version = "0.1.0"
-dependencies = [
- "hd-analyzer-core",
- "log",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-log",
- "tauri-plugin-macos-permissions",
- "tauri-plugin-opener",
- "trash",
-]
-
-[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3617,6 +3582,41 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "space-lenser-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "core-foundation-sys",
+ "humansize",
+ "jwalk",
+ "log",
+ "nix",
+ "objc2-foundation",
+ "rayon",
+ "serde",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.18",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "space-lenser-tauri"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "space-lenser-core",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tauri-plugin-macos-permissions",
+ "tauri-plugin-opener",
+ "trash",
 ]
 
 [[package]]

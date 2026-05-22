@@ -29,7 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .setup(|_app| {
-            log::info!("HD Analyzer Tauri runtime initialized");
+            log::info!("Space Lenser Tauri runtime initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,5 +49,5 @@ pub fn run() {
             check_permissions
         ])
         .run(tauri::generate_context!())
-        .expect("error while running HD Analyzer Tauri application");
+        .expect("error while running Space Lenser Tauri application");
 }

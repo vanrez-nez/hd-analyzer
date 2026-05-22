@@ -13,10 +13,10 @@
 **Purpose**: Add dependencies, UI primitives, and empty module structure needed by the feature.
 
 - [X] T001 Update workspace dependencies for `jwalk`, `thiserror`, `nix`, target-specific `windows`, and optional `rmp-serde` in Cargo.toml
-- [X] T002 Update core crate dependencies for `jwalk`, `thiserror`, `nix`, target-specific `windows`, and test support in crates/hd-analyzer-core/Cargo.toml
+- [X] T002 Update core crate dependencies for `jwalk`, `thiserror`, `nix`, target-specific `windows`, and test support in crates/space-lenser-core/Cargo.toml
 - [X] T003 Add shadcn `button-group` and `spinner` components while preserving existing `table` and `button` components in src-web/src/components/ui/button-group.tsx and src-web/src/components/ui/spinner.tsx
 - [X] T004 Create fs-explorer frontend feature directory and placeholder files in src-web/src/features/fs-explorer/FsExplorer.tsx, src-web/src/features/fs-explorer/PathButtonGroup.tsx, src-web/src/features/fs-explorer/ExplorerTable.tsx, src-web/src/features/fs-explorer/cache.ts, and src-web/src/features/fs-explorer/types.ts
-- [X] T005 Create core driver module placeholders and exports in crates/hd-analyzer-core/src/driver.rs, crates/hd-analyzer-core/src/size.rs, crates/hd-analyzer-core/src/rules.rs, crates/hd-analyzer-core/src/cache.rs, crates/hd-analyzer-core/src/jobs.rs, and crates/hd-analyzer-core/src/lib.rs
+- [X] T005 Create core driver module placeholders and exports in crates/space-lenser-core/src/driver.rs, crates/space-lenser-core/src/size.rs, crates/space-lenser-core/src/rules.rs, crates/space-lenser-core/src/cache.rs, crates/space-lenser-core/src/jobs.rs, and crates/space-lenser-core/src/lib.rs
 
 ---
 
@@ -26,16 +26,16 @@
 
 **Critical**: No user story work should begin until these contracts compile.
 
-- [X] T006 Define `Volume`, `ScanConfig`, `PathNode`, `DirectoryListing`, `ReadIssue`, `SizeMeasurement`, and state enums in crates/hd-analyzer-core/src/driver.rs
-- [X] T007 [P] Define stable `DriverError` and driver result aliases in crates/hd-analyzer-core/src/driver.rs
+- [X] T006 Define `Volume`, `ScanConfig`, `PathNode`, `DirectoryListing`, `ReadIssue`, `SizeMeasurement`, and state enums in crates/space-lenser-core/src/driver.rs
+- [X] T007 [P] Define stable `DriverError` and driver result aliases in crates/space-lenser-core/src/driver.rs
 - [X] T008 [P] Define Tauri DTOs for volumes, listings, nodes, scan config, issues, progress, and command errors in src-tauri/src/dto.rs
 - [X] T009 [P] Define TypeScript DTO and UI state types matching Tauri IPC contracts in src-web/src/features/fs-explorer/types.ts
-- [X] T010 Implement platform size identity and allocated-size helpers for Unix and fallback platforms in crates/hd-analyzer-core/src/size.rs
-- [X] T011 [P] Add Unix hard-link dedupe and allocated-size unit tests in crates/hd-analyzer-core/src/size.rs
-- [X] T012 Implement scan config fingerprinting and default scan configuration in crates/hd-analyzer-core/src/rules.rs
-- [X] T013 [P] Add scan config validation and fingerprint unit tests in crates/hd-analyzer-core/src/rules.rs
-- [X] T014 Implement in-memory directory cache entry, generation, freshness, and stale-state primitives in crates/hd-analyzer-core/src/cache.rs
-- [X] T015 [P] Add cache generation and stale-state unit tests in crates/hd-analyzer-core/src/cache.rs
+- [X] T010 Implement platform size identity and allocated-size helpers for Unix and fallback platforms in crates/space-lenser-core/src/size.rs
+- [X] T011 [P] Add Unix hard-link dedupe and allocated-size unit tests in crates/space-lenser-core/src/size.rs
+- [X] T012 Implement scan config fingerprinting and default scan configuration in crates/space-lenser-core/src/rules.rs
+- [X] T013 [P] Add scan config validation and fingerprint unit tests in crates/space-lenser-core/src/rules.rs
+- [X] T014 Implement in-memory directory cache entry, generation, freshness, and stale-state primitives in crates/space-lenser-core/src/cache.rs
+- [X] T015 [P] Add cache generation and stale-state unit tests in crates/space-lenser-core/src/cache.rs
 - [X] T016 Wire shared driver state container into Tauri application state in src-tauri/src/state.rs
 
 **Checkpoint**: Foundation compiles and user story implementation can begin.
@@ -50,15 +50,15 @@
 
 ### Tests for User Story 1
 
-- [X] T017 [P] [US1] Add core driver tests for volume listing and immediate directory listing behavior in crates/hd-analyzer-core/src/driver.rs
+- [X] T017 [P] [US1] Add core driver tests for volume listing and immediate directory listing behavior in crates/space-lenser-core/src/driver.rs
 - [ ] T018 [P] [US1] Add frontend cache reducer tests for path insert and path retrieval behavior in src-web/src/features/fs-explorer/cache.ts
 - [X] T019 [US1] Document manual volume-to-directory navigation validation in specs/002-fs-explorer-driver/quickstart.md
 
 ### Implementation for User Story 1
 
-- [X] T020 [US1] Implement `HdDriver::list_volumes` using existing sysinfo drive discovery data in crates/hd-analyzer-core/src/driver.rs and crates/hd-analyzer-core/src/drives.rs
-- [X] T021 [US1] Implement immediate `HdDriver::open_path` and `HdDriver::get_directory` cache-or-placeholder behavior in crates/hd-analyzer-core/src/driver.rs
-- [X] T022 [US1] Implement shallow directory entry discovery with issue capture and symlink skip metadata in crates/hd-analyzer-core/src/scan.rs
+- [X] T020 [US1] Implement `HdDriver::list_volumes` using existing sysinfo drive discovery data in crates/space-lenser-core/src/driver.rs and crates/space-lenser-core/src/drives.rs
+- [X] T021 [US1] Implement immediate `HdDriver::open_path` and `HdDriver::get_directory` cache-or-placeholder behavior in crates/space-lenser-core/src/driver.rs
+- [X] T022 [US1] Implement shallow directory entry discovery with issue capture and symlink skip metadata in crates/space-lenser-core/src/scan.rs
 - [X] T023 [US1] Add `fs_list_volumes`, `fs_open_path`, and `fs_get_directory` Tauri commands in src-tauri/src/commands.rs
 - [X] T024 [US1] Register fs-explorer Tauri commands in src-tauri/src/lib.rs
 - [X] T025 [US1] Implement frontend Tauri wrappers for volume and directory commands in src-web/src/api.ts
@@ -81,16 +81,16 @@
 
 ### Tests for User Story 2
 
-- [X] T032 [P] [US2] Add unit tests for expansion threshold, minimum visible threshold, and hidden-entry rules in crates/hd-analyzer-core/src/rules.rs
-- [X] T033 [P] [US2] Add fixture scan tests for repeated one-level expansion and visible-folder filtering in crates/hd-analyzer-core/src/scan.rs
+- [X] T032 [P] [US2] Add unit tests for expansion threshold, minimum visible threshold, and hidden-entry rules in crates/space-lenser-core/src/rules.rs
+- [X] T033 [P] [US2] Add fixture scan tests for repeated one-level expansion and visible-folder filtering in crates/space-lenser-core/src/scan.rs
 - [X] T034 [US2] Document small-threshold fixture validation for size rules in specs/002-fs-explorer-driver/quickstart.md
 
 ### Implementation for User Story 2
 
-- [X] T035 [US2] Implement rule evaluation for expand-above, min-visible, hidden visibility, symlink skip, and filesystem-boundary skip in crates/hd-analyzer-core/src/rules.rs
-- [X] T036 [US2] Replace full-result recursion with bounded `jwalk` directory measurement jobs that apply scan rules in crates/hd-analyzer-core/src/scan.rs
-- [X] T037 [US2] Aggregate exact measured visible directory sizes using `SizeMeasurement` and hard-link dedupe in crates/hd-analyzer-core/src/scan.rs
-- [X] T038 [US2] Persist applied scan config, visible children, and skip metadata into cache entries in crates/hd-analyzer-core/src/cache.rs
+- [X] T035 [US2] Implement rule evaluation for expand-above, min-visible, hidden visibility, symlink skip, and filesystem-boundary skip in crates/space-lenser-core/src/rules.rs
+- [X] T036 [US2] Replace full-result recursion with bounded `jwalk` directory measurement jobs that apply scan rules in crates/space-lenser-core/src/scan.rs
+- [X] T037 [US2] Aggregate exact measured visible directory sizes using `SizeMeasurement` and hard-link dedupe in crates/space-lenser-core/src/scan.rs
+- [X] T038 [US2] Persist applied scan config, visible children, and skip metadata into cache entries in crates/space-lenser-core/src/cache.rs
 - [X] T039 [US2] Accept `ScanConfigDto` in fs-explorer Tauri commands and map it to core config in src-tauri/src/commands.rs
 - [X] T040 [US2] Apply default scan configuration without adding extra visible controls in src-web/src/features/fs-explorer/FsExplorer.tsx
 - [X] T041 [US2] Render filtered rows and issue metadata without additional navigation controls in src-web/src/features/fs-explorer/ExplorerTable.tsx
@@ -107,15 +107,15 @@
 
 ### Tests for User Story 3
 
-- [ ] T042 [P] [US3] Add core tests for preload depth, requested depth, and deferred child scheduling in crates/hd-analyzer-core/src/jobs.rs
-- [ ] T043 [P] [US3] Add cache tests for returning measured directories without backend rediscovery in crates/hd-analyzer-core/src/cache.rs
+- [ ] T042 [P] [US3] Add core tests for preload depth, requested depth, and deferred child scheduling in crates/space-lenser-core/src/jobs.rs
+- [ ] T043 [P] [US3] Add cache tests for returning measured directories without backend rediscovery in crates/space-lenser-core/src/cache.rs
 - [X] T044 [US3] Document ten-level lazy-load fixture validation in specs/002-fs-explorer-driver/quickstart.md
 
 ### Implementation for User Story 3
 
-- [X] T045 [US3] Implement scan job registry, job ids, request ids, cancellation tokens, and worker scheduling in crates/hd-analyzer-core/src/jobs.rs
-- [X] T046 [US3] Implement preload-depth scheduling and deferred deeper-level scheduling in crates/hd-analyzer-core/src/driver.rs
-- [X] T047 [US3] Return partial listings with `has_more_depth`, `loaded_depth`, and working child nodes in crates/hd-analyzer-core/src/driver.rs
+- [X] T045 [US3] Implement scan job registry, job ids, request ids, cancellation tokens, and worker scheduling in crates/space-lenser-core/src/jobs.rs
+- [X] T046 [US3] Implement preload-depth scheduling and deferred deeper-level scheduling in crates/space-lenser-core/src/driver.rs
+- [X] T047 [US3] Return partial listings with `has_more_depth`, `loaded_depth`, and working child nodes in crates/space-lenser-core/src/driver.rs
 - [X] T048 [US3] Add `fs_start_scan` and `fs_cancel_job` command shells backed by the job registry in src-tauri/src/commands.rs
 - [X] T049 [US3] Update frontend cache to store partial listings, placeholder rows, and loaded-depth metadata in src-web/src/features/fs-explorer/cache.ts
 - [X] T050 [US3] Render partial and placeholder rows without blocking table row navigation in src-web/src/features/fs-explorer/ExplorerTable.tsx
@@ -132,14 +132,14 @@
 
 ### Tests for User Story 4
 
-- [X] T051 [P] [US4] Add progress state transition tests for discovered, scheduled, completed, skipped, failed, and canceled units in crates/hd-analyzer-core/src/jobs.rs
+- [X] T051 [P] [US4] Add progress state transition tests for discovered, scheduled, completed, skipped, failed, and canceled units in crates/space-lenser-core/src/jobs.rs
 - [X] T052 [P] [US4] Add DTO serialization tests for `FsProgressEvent` and `ProgressSnapshot` in src-tauri/src/dto.rs
 - [X] T053 [US4] Document progress and row spinner validation in specs/002-fs-explorer-driver/quickstart.md
 
 ### Implementation for User Story 4
 
-- [X] T054 [US4] Implement `ProgressSnapshot` accounting and terminal completion rules in crates/hd-analyzer-core/src/jobs.rs
-- [X] T055 [US4] Emit ordered driver events for job queued, started, row updated, directory ready, progress snapshot, finished, and failed in crates/hd-analyzer-core/src/driver.rs
+- [X] T054 [US4] Implement `ProgressSnapshot` accounting and terminal completion rules in crates/space-lenser-core/src/jobs.rs
+- [X] T055 [US4] Emit ordered driver events for job queued, started, row updated, directory ready, progress snapshot, finished, and failed in crates/space-lenser-core/src/driver.rs
 - [X] T056 [US4] Stream `FsProgressEvent` updates over Tauri v2 channels in src-tauri/src/commands.rs
 - [X] T057 [US4] Consume Tauri channel progress events and reject stale generations in src-web/src/api.ts
 - [X] T058 [US4] Update fs-explorer state from row and progress events in src-web/src/features/fs-explorer/FsExplorer.tsx
@@ -157,14 +157,14 @@
 
 ### Tests for User Story 5
 
-- [X] T060 [P] [US5] Add core tests for path-only and descendant invalidation preserving unrelated cache entries in crates/hd-analyzer-core/src/cache.rs
-- [X] T061 [P] [US5] Add job supersession tests for invalidated paths replacing older active jobs in crates/hd-analyzer-core/src/jobs.rs
+- [X] T060 [P] [US5] Add core tests for path-only and descendant invalidation preserving unrelated cache entries in crates/space-lenser-core/src/cache.rs
+- [X] T061 [P] [US5] Add job supersession tests for invalidated paths replacing older active jobs in crates/space-lenser-core/src/jobs.rs
 - [X] T062 [US5] Document path invalidation validation in specs/002-fs-explorer-driver/quickstart.md
 
 ### Implementation for User Story 5
 
-- [X] T063 [US5] Implement `HdDriver::invalidate_path` with stale marking, generation bumping, and affected job supersession in crates/hd-analyzer-core/src/driver.rs
-- [X] T064 [US5] Implement cache descendant invalidation and unrelated-entry preservation in crates/hd-analyzer-core/src/cache.rs
+- [X] T063 [US5] Implement `HdDriver::invalidate_path` with stale marking, generation bumping, and affected job supersession in crates/space-lenser-core/src/driver.rs
+- [X] T064 [US5] Implement cache descendant invalidation and unrelated-entry preservation in crates/space-lenser-core/src/cache.rs
 - [X] T065 [US5] Add `fs_invalidate_path` Tauri command and invalidation DTO mapping in src-tauri/src/commands.rs
 - [X] T066 [US5] Add frontend API wrapper for invalidating the current path without adding extra navigation controls in src-web/src/api.ts
 - [ ] T067 [US5] Apply invalidation events and refreshed listings to frontend cache generations in src-web/src/features/fs-explorer/cache.ts
@@ -224,7 +224,7 @@
 ## Parallel Example: User Story 1
 
 ```text
-Task: "T017 [P] [US1] Add core driver tests for volume listing and immediate directory listing behavior in crates/hd-analyzer-core/src/driver.rs"
+Task: "T017 [P] [US1] Add core driver tests for volume listing and immediate directory listing behavior in crates/space-lenser-core/src/driver.rs"
 Task: "T018 [P] [US1] Add frontend cache reducer tests for path insert and path retrieval behavior in src-web/src/features/fs-explorer/cache.ts"
 
 Task: "T027 [US1] Implement volumes and directory rows table using shadcn Table in src-web/src/features/fs-explorer/ExplorerTable.tsx"
@@ -234,14 +234,14 @@ Task: "T028 [US1] Implement grouped breadcrumb navigation using shadcn ButtonGro
 ## Parallel Example: User Story 2
 
 ```text
-Task: "T032 [P] [US2] Add unit tests for expansion threshold, minimum visible threshold, and hidden-entry rules in crates/hd-analyzer-core/src/rules.rs"
-Task: "T033 [P] [US2] Add fixture scan tests for repeated one-level expansion and visible-folder filtering in crates/hd-analyzer-core/src/scan.rs"
+Task: "T032 [P] [US2] Add unit tests for expansion threshold, minimum visible threshold, and hidden-entry rules in crates/space-lenser-core/src/rules.rs"
+Task: "T033 [P] [US2] Add fixture scan tests for repeated one-level expansion and visible-folder filtering in crates/space-lenser-core/src/scan.rs"
 ```
 
 ## Parallel Example: User Story 4
 
 ```text
-Task: "T051 [P] [US4] Add progress state transition tests for discovered, scheduled, completed, skipped, failed, and canceled units in crates/hd-analyzer-core/src/jobs.rs"
+Task: "T051 [P] [US4] Add progress state transition tests for discovered, scheduled, completed, skipped, failed, and canceled units in crates/space-lenser-core/src/jobs.rs"
 Task: "T052 [P] [US4] Add DTO serialization tests for `FsProgressEvent` and `ProgressSnapshot` in src-tauri/src/dto.rs"
 ```
 

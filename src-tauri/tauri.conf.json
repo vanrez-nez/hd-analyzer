@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "HD Analyzer",
+  "productName": "Space Lenser",
   "version": "0.1.0",
-  "identifier": "dev.vanrez.hd-analyzer",
+  "identifier": "dev.vanrez.space-lenser",
   "build": {
     "beforeDevCommand": "npm --prefix ../src-web run dev",
     "beforeBuildCommand": "npm --prefix ../src-web run build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "HD Analyzer",
+        "title": "Space Lenser",
         "width": 1180,
         "height": 760,
         "minWidth": 920,

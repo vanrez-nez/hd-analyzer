@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "Create an fs-explorer component at the core of HD Analyzer with a cross-platform driver for listing volumes, asynchronous scans, size-rule scan depth, threshold filtering, hidden-file visibility, lazy-loaded precise directory levels, accurate progress, non-blocking navigation, cached directories, path invalidation, breadcrumb-style grouped navigation, clickable directory rows, and per-item working indicators."
+**Input**: User description: "Create an fs-explorer component at the core of Space Lenser with a cross-platform driver for listing volumes, asynchronous scans, size-rule scan depth, threshold filtering, hidden-file visibility, lazy-loaded precise directory levels, accurate progress, non-blocking navigation, cached directories, path invalidation, breadcrumb-style grouped navigation, clickable directory rows, and per-item working indicators."
 
 ## User Scenarios & Testing *(mandatory)*
 

@@ -1,18 +1,18 @@
 [package]
-name = "hd-analyzer-tauri"
+name = "space-lenser-tauri"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "hd_analyzer_tauri"
+name = "space_lenser_tauri"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build.workspace = true
 
 [dependencies]
-hd-analyzer-core = { path = "../crates/hd-analyzer-core" }
+space-lenser-core = { path = "../crates/space-lenser-core" }
 log = "0.4.29"
 serde.workspace = true
 serde_json.workspace = true

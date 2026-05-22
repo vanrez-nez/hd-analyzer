@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use hd_analyzer_core::{
+use serde::{Deserialize, Serialize};
+use space_lenser_core::{
     DeleteSafetyClassification, DeleteSafetyFlag, DirectoryListing, DirectoryOpenProgress,
     DirectoryProgressUpdate, DriverEvent, EntryKind, InvalidationReceipt, InvalidationScope,
     LiveUpdateConfig, NodeState, PathDeleteSafety, PathNode, ProgressSnapshot, ScanConfig,
     ScanIssue, SizeMeasurementMode, StartScanReceipt, Volume,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use hd_analyzer_core::LocalHdDriver;
+use space_lenser_core::LocalHdDriver;
 
 #[derive(Clone, Default)]
 pub struct AppState {

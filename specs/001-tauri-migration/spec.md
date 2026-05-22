@@ -12,7 +12,7 @@
 
 ### User Story 1 - Launch Desktop Analyzer (Priority: P1)
 
-As a user, I can open HD Analyzer as a desktop application and see my available drives without
+As a user, I can open Space Lenser as a desktop application and see my available drives without
 starting a terminal UI.
 
 **Why this priority**: This establishes the replacement product surface and proves that the
@@ -35,7 +35,7 @@ using terminal controls.
 As a user, I can start a scan from the desktop interface, watch progress while it runs, and browse
 directory results after or during scanning.
 
-**Why this priority**: The core value of HD Analyzer is responsive disk analysis, not just drive
+**Why this priority**: The core value of Space Lenser is responsive disk analysis, not just drive
 listing.
 
 **Independent Test**: Select a drive, start a scan, verify progress updates, navigate into at least

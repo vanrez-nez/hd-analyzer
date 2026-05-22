@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hd_analyzer_core::{HdDriver, OpenPathRequest, StartScanRequest};
+use space_lenser_core::{HdDriver, OpenPathRequest, StartScanRequest};
 use tauri::{AppHandle, State, ipc::Channel};
 use tauri_plugin_opener::OpenerExt;
 
@@ -13,7 +13,7 @@ use crate::dto::{
 };
 use crate::state::AppState;
 
-const REPOSITORY_HOMEPAGE_URL: &str = "https://github.com/vanrez-nez/hd-analyzer";
+const REPOSITORY_HOMEPAGE_URL: &str = "https://github.com/vanrez-nez/space-lenser";
 
 #[tauri::command]
 pub fn fs_list_volumes(state: State<'_, AppState>) -> Result<Vec<DriveDto>, CommandError> {
@@ -92,7 +92,7 @@ pub fn fs_open_path_with_progress(
 
     let progress_path = path.display().to_string();
     let channel = progress_channel.clone();
-    let progress_callback = move |progress: hd_analyzer_core::DirectoryOpenProgress| {
+    let progress_callback = move |progress: space_lenser_core::DirectoryOpenProgress| {
         let _ = channel.send(FsOpenProgressEventDto::new(progress_path.clone(), progress));
     };
     let request = OpenPathRequest {
@@ -163,7 +163,7 @@ pub fn fs_start_scan(
     let channel = progress_channel.clone();
     let sink = Arc::new(move |event| {
         match &event {
-            hd_analyzer_core::DriverEvent::DirectoryReady { path, listing, .. } => {
+            space_lenser_core::DriverEvent::DirectoryReady { path, listing, .. } => {
                 log::info!(
                     "filesystem scan produced listing for {} with {} child node(s), total measured size {}, total logical size {}",
                     path.display(),
@@ -172,13 +172,13 @@ pub fn fs_start_scan(
                     listing.total_logical_size
                 );
             }
-            hd_analyzer_core::DriverEvent::JobFinished { job_id, path, .. } => {
+            space_lenser_core::DriverEvent::JobFinished { job_id, path, .. } => {
                 log::info!(
                     "filesystem scan job {job_id} finished for {}",
                     path.display()
                 );
             }
-            hd_analyzer_core::DriverEvent::JobFailed {
+            space_lenser_core::DriverEvent::JobFailed {
                 job_id,
                 path,
                 message,
@@ -430,7 +430,7 @@ pub fn check_permissions(root: Option<String>) -> PermissionCheckDto {
             );
             PermissionCheckDto {
                 granted: false,
-                message: format!("HD Analyzer cannot read {}: {error}", root_path.display()),
+                message: format!("Space Lenser cannot read {}: {error}", root_path.display()),
             }
         }
     }
@@ -522,7 +522,7 @@ fn ensure_delete_path_allowed(volume_root: &Path, path: &Path) -> Result<(), Com
         ));
     }
 
-    let safety = hd_analyzer_core::safety::classify_path_safety(path);
+    let safety = space_lenser_core::safety::classify_path_safety(path);
     if !safety.can_delete_now {
         return Err(CommandError::new(
             CommandErrorCode::DeleteFailed,
@@ -562,15 +562,15 @@ fn chrono_like_timestamp() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
-fn command_error(error: hd_analyzer_core::DriverError) -> CommandError {
+fn command_error(error: space_lenser_core::DriverError) -> CommandError {
     let code = match error {
-        hd_analyzer_core::DriverError::JobNotFound(_) => CommandErrorCode::JobNotFound,
-        hd_analyzer_core::DriverError::DriverUnavailable(_) => CommandErrorCode::DriverUnavailable,
-        hd_analyzer_core::DriverError::InvalidPath(_) => CommandErrorCode::InvalidRoot,
-        hd_analyzer_core::DriverError::PathOutsideVolume(_) => CommandErrorCode::PathOutsideVolume,
-        hd_analyzer_core::DriverError::PermissionDenied(_) => CommandErrorCode::PathOutsideRoot,
-        hd_analyzer_core::DriverError::ScanCanceled => CommandErrorCode::ScanStartFailed,
-        hd_analyzer_core::DriverError::Io { .. } => CommandErrorCode::DriverUnavailable,
+        space_lenser_core::DriverError::JobNotFound(_) => CommandErrorCode::JobNotFound,
+        space_lenser_core::DriverError::DriverUnavailable(_) => CommandErrorCode::DriverUnavailable,
+        space_lenser_core::DriverError::InvalidPath(_) => CommandErrorCode::InvalidRoot,
+        space_lenser_core::DriverError::PathOutsideVolume(_) => CommandErrorCode::PathOutsideVolume,
+        space_lenser_core::DriverError::PermissionDenied(_) => CommandErrorCode::PathOutsideRoot,
+        space_lenser_core::DriverError::ScanCanceled => CommandErrorCode::ScanStartFailed,
+        space_lenser_core::DriverError::Io { .. } => CommandErrorCode::DriverUnavailable,
     };
     CommandError::new(code, error.to_string())
 }
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn maps_outside_volume_driver_error_to_outside_volume_code() {
-        let error = command_error(hd_analyzer_core::DriverError::PathOutsideVolume(
+        let error = command_error(space_lenser_core::DriverError::PathOutsideVolume(
             "outside".to_string(),
         ));
 

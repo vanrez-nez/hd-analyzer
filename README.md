@@ -1,12 +1,12 @@
-# HD Analyzer
+# Space Lenser
 
 A Tauri desktop disk usage analyzer built with Rust, React, and shadcn/ui.
 
-![HD Analyzer logo](src-web/public/logo.png)
+![Space Lenser logo](src-web/public/logo.png)
 
 ## Overview
 
-HD Analyzer gives you a desktop view into storage usage. It uses a Rust scanner backend through Tauri commands and a React frontend for drive selection, scan progress, hierarchical browsing, category breakdowns, and permission/error visibility.
+Space Lenser gives you a desktop view into storage usage. It uses a Rust scanner backend through Tauri commands and a React frontend for drive selection, scan progress, hierarchical browsing, category breakdowns, and permission/error visibility.
 
 ## Key Features
 
@@ -27,8 +27,8 @@ HD Analyzer gives you a desktop view into storage usage. It uses a Rust scanner 
 
 ### Build from source
 ```bash
-git clone https://github.com/vanrez-nez/hd-analyzer.git
-cd hd-analyzer
+git clone https://github.com/vanrez-nez/space-lenser.git
+cd space-lenser
 npm --prefix src-web install
 npm --prefix src-web run tauri:build
 ```

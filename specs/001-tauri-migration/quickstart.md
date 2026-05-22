@@ -9,7 +9,7 @@
 ## Implementation Setup
 
 1. Convert the repository to a Rust workspace.
-2. Move deterministic scanner/domain logic into `crates/hd-analyzer-core`.
+2. Move deterministic scanner/domain logic into `crates/space-lenser-core`.
 3. Add `src-tauri/` with Tauri v2 configuration, conservative main-window capability, backend
    state, and registered commands from `contracts/tauri-ipc.md`.
 4. Add `src-web/` as a Vite + React + TypeScript frontend.

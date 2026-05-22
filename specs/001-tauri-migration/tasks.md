@@ -20,7 +20,7 @@ of each story.
 
 ## Path Conventions
 
-- **Rust workspace**: `Cargo.toml`, `crates/hd-analyzer-core/`, `src-tauri/`
+- **Rust workspace**: `Cargo.toml`, `crates/space-lenser-core/`, `src-tauri/`
 - **Frontend**: `src-web/`
 - **Contracts and validation docs**: `specs/001-tauri-migration/`
 
@@ -29,8 +29,8 @@ of each story.
 **Purpose**: Establish the workspace, Tauri shell, and React/shadcn frontend structure required by
 every user story.
 
-- [X] T001 Convert root package into a Cargo workspace with members for `crates/hd-analyzer-core` and `src-tauri` in Cargo.toml
-- [X] T002 Create `crates/hd-analyzer-core/Cargo.toml` with shared Rust dependencies in crates/hd-analyzer-core/Cargo.toml
+- [X] T001 Convert root package into a Cargo workspace with members for `crates/space-lenser-core` and `src-tauri` in Cargo.toml
+- [X] T002 Create `crates/space-lenser-core/Cargo.toml` with shared Rust dependencies in crates/space-lenser-core/Cargo.toml
 - [X] T003 Remove terminal app package metadata from the workspace
 - [X] T004 Remove terminal app source files so the Tauri desktop app is the only supported product surface
 - [X] T005 Create Tauri backend package files in `src-tauri/Cargo.toml`, `src-tauri/build.rs`, and `src-tauri/tauri.conf.json`
@@ -53,16 +53,16 @@ any story-specific UI or command work begins.
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [X] T013 Create public core module layout in `crates/hd-analyzer-core/src/lib.rs`, `crates/hd-analyzer-core/src/drives.rs`, `crates/hd-analyzer-core/src/scan.rs`, `crates/hd-analyzer-core/src/categories.rs`, and `crates/hd-analyzer-core/src/paths.rs`
-- [X] T014 Move Drive, FileKind, CategoryUsage, ReadError, ScanProgress, ScanResult, and formatting/path helpers from CLI code into `crates/hd-analyzer-core/src/lib.rs` and supporting modules
-- [X] T015 Move drive discovery and macOS duplicate-volume handling into `crates/hd-analyzer-core/src/drives.rs`
-- [X] T016 Move file kind detection, executable detection, and category collection into `crates/hd-analyzer-core/src/categories.rs`
-- [X] T017 Move allocated disk usage, symlink skipping, filesystem-boundary checks, parallel traversal, and progress snapshots into `crates/hd-analyzer-core/src/scan.rs`
-- [X] T018 Move compact path and ratio/byte formatting helpers into `crates/hd-analyzer-core/src/paths.rs`
-- [X] T019 Add unit tests for category classification and executable fallback in `crates/hd-analyzer-core/src/categories.rs`
-- [X] T020 Add unit tests for path compaction and ratio formatting in `crates/hd-analyzer-core/src/paths.rs`
-- [X] T021 Add unit tests for Drive used-space saturating arithmetic and duplicate mount handling where platform-independent in `crates/hd-analyzer-core/src/drives.rs`
-- [X] T022 Add scan regression test helpers for temporary directory scanning, symlink skipping, and directory totals in `crates/hd-analyzer-core/src/scan.rs`
+- [X] T013 Create public core module layout in `crates/space-lenser-core/src/lib.rs`, `crates/space-lenser-core/src/drives.rs`, `crates/space-lenser-core/src/scan.rs`, `crates/space-lenser-core/src/categories.rs`, and `crates/space-lenser-core/src/paths.rs`
+- [X] T014 Move Drive, FileKind, CategoryUsage, ReadError, ScanProgress, ScanResult, and formatting/path helpers from CLI code into `crates/space-lenser-core/src/lib.rs` and supporting modules
+- [X] T015 Move drive discovery and macOS duplicate-volume handling into `crates/space-lenser-core/src/drives.rs`
+- [X] T016 Move file kind detection, executable detection, and category collection into `crates/space-lenser-core/src/categories.rs`
+- [X] T017 Move allocated disk usage, symlink skipping, filesystem-boundary checks, parallel traversal, and progress snapshots into `crates/space-lenser-core/src/scan.rs`
+- [X] T018 Move compact path and ratio/byte formatting helpers into `crates/space-lenser-core/src/paths.rs`
+- [X] T019 Add unit tests for category classification and executable fallback in `crates/space-lenser-core/src/categories.rs`
+- [X] T020 Add unit tests for path compaction and ratio formatting in `crates/space-lenser-core/src/paths.rs`
+- [X] T021 Add unit tests for Drive used-space saturating arithmetic and duplicate mount handling where platform-independent in `crates/space-lenser-core/src/drives.rs`
+- [X] T022 Add scan regression test helpers for temporary directory scanning, symlink skipping, and directory totals in `crates/space-lenser-core/src/scan.rs`
 - [X] T023 Remove deferred CLI wrapper task because terminal app support is no longer retained
 - [X] T024 Create Tauri DTO types for DriveDto, ScanSessionDto, ScanProgressDto, ScanResultDto, DirectoryEntryDto, CategoryUsageDto, ReadErrorDto, and error codes in `src-tauri/src/dto.rs`
 - [X] T025 Create Tauri managed application state for active sessions, scan workers, and result storage in `src-tauri/src/state.rs`
@@ -82,7 +82,7 @@ any story-specific UI or command work begins.
 
 ## Phase 3: User Story 1 - Launch Desktop Analyzer (Priority: P1) MVP
 
-**Goal**: A user can open HD Analyzer as a desktop application and see available drives without
+**Goal**: A user can open Space Lenser as a desktop application and see available drives without
 starting a terminal UI.
 
 **Independent Test**: Start the desktop app, confirm the drive list loads, and quit the app without
@@ -96,7 +96,7 @@ using terminal controls.
 
 ### Implementation for User Story 1
 
-- [X] T038 [US1] Implement `list_drives` Tauri command using `hd-analyzer-core` drive discovery in `src-tauri/src/commands.rs`
+- [X] T038 [US1] Implement `list_drives` Tauri command using `space-lenser-core` drive discovery in `src-tauri/src/commands.rs`
 - [X] T039 [US1] Implement DriveSelection view with shadcn card/table rows, badges, alert empty/error state, and scan action in `src-web/src/views/DriveSelection.tsx`
 - [X] T040 [US1] Integrate DriveSelection into the root app shell and initial loading/error states in `src-web/src/App.tsx`
 - [X] T041 [US1] Add drive selection actions and selected-drive state transitions in `src-web/src/state.ts`
@@ -118,7 +118,7 @@ one directory, return to its parent, and rescan a focused folder.
 
 ### Tests for User Story 2
 
-- [ ] T045 [P] [US2] Add core tests for building sorted directory entries and virtual root rows in `crates/hd-analyzer-core/src/scan.rs`
+- [ ] T045 [P] [US2] Add core tests for building sorted directory entries and virtual root rows in `crates/space-lenser-core/src/scan.rs`
 - [ ] T046 [P] [US2] Add command tests for `start_scan`, stale session rejection, `list_directory_entries`, and `rescan_subtree` in `src-tauri/src/commands.rs`
 - [ ] T047 [P] [US2] Add frontend type/build coverage for scan progress, explorer rows, and category usage state in `src-web/src/views/ScanExplorer.tsx`
 - [ ] T048 [US2] Update manual scan/explorer/rescan validation steps in `specs/001-tauri-migration/quickstart.md`
@@ -151,14 +151,14 @@ shows hidden/unscanned space plus a readable error log.
 
 ### Tests for User Story 3
 
-- [ ] T060 [P] [US3] Add core tests for read-error preservation and hidden/unscanned byte derivation in `crates/hd-analyzer-core/src/scan.rs`
+- [ ] T060 [P] [US3] Add core tests for read-error preservation and hidden/unscanned byte derivation in `crates/space-lenser-core/src/scan.rs`
 - [ ] T061 [P] [US3] Add command tests for `get_read_errors` and virtual hidden/unscanned entry behavior in `src-tauri/src/commands.rs`
 - [ ] T062 [P] [US3] Add frontend type/build coverage for error log and permission alert rendering in `src-web/src/views/ErrorLog.tsx`
 - [ ] T063 [US3] Document host-specific manual permission test setup in `specs/001-tauri-migration/quickstart.md`
 
 ### Implementation for User Story 3
 
-- [ ] T064 [US3] Ensure scan results expose `hiddenUnscannedBytes` without mixing it into scanned totals in `crates/hd-analyzer-core/src/scan.rs`
+- [ ] T064 [US3] Ensure scan results expose `hiddenUnscannedBytes` without mixing it into scanned totals in `crates/space-lenser-core/src/scan.rs`
 - [ ] T065 [US3] Implement `get_read_errors` command and read-error DTO mapping in `src-tauri/src/commands.rs`
 - [ ] T066 [US3] Add virtual hidden/unscanned row handling to directory entry responses in `src-tauri/src/commands.rs`
 - [ ] T067 [US3] Implement ErrorLog view with shadcn alert, scroll-area, badge, and readable long-path handling in `src-web/src/views/ErrorLog.tsx`
@@ -206,7 +206,7 @@ stories.
 
 - [ ] T081 [P] Update README usage, build, and development instructions for the Tauri app in README.md
 - [ ] T082 [P] Update AGENTS.md if implementation plan paths or commands changed from specs/001-tauri-migration/plan.md
-- [ ] T083 [P] Add regression tests for public core APIs that remained uncovered in `crates/hd-analyzer-core/src/lib.rs`
+- [ ] T083 [P] Add regression tests for public core APIs that remained uncovered in `crates/space-lenser-core/src/lib.rs`
 - [ ] T084 Review Tauri capability scope and remove unused permissions in `src-tauri/capabilities/main.json`
 - [ ] T085 Review IPC DTOs against `specs/001-tauri-migration/contracts/tauri-ipc.md` and fix contract drift in `src-tauri/src/dto.rs`
 - [ ] T086 Review frontend component coverage against `specs/001-tauri-migration/contracts/frontend-ui.md` and fix component drift in `src-web/src/`
@@ -262,7 +262,7 @@ stories.
 
 ```bash
 # Independent test/design tasks:
-Task: "T045 [P] [US2] Add core tests for building sorted directory entries and virtual root rows in crates/hd-analyzer-core/src/scan.rs"
+Task: "T045 [P] [US2] Add core tests for building sorted directory entries and virtual root rows in crates/space-lenser-core/src/scan.rs"
 Task: "T046 [P] [US2] Add command tests for start_scan, stale session rejection, list_directory_entries, and rescan_subtree in src-tauri/src/commands.rs"
 Task: "T047 [P] [US2] Add frontend type/build coverage for scan progress, explorer rows, and category usage state in src-web/src/views/ScanExplorer.tsx"
 ```

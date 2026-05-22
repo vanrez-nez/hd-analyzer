@@ -1,5 +1,5 @@
 [package]
-name = "hd-analyzer-core"
+name = "space-lenser-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

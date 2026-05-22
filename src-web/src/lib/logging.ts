@@ -19,7 +19,7 @@ export async function initializeLogging() {
 
   try {
     await attachConsole()
-    await logInfo("HD Analyzer webview logging initialized")
+    await logInfo("Space Lenser webview logging initialized")
   } catch (error) {
     pluginAvailable = false
     if (isDev) {

@@ -8,7 +8,7 @@
 
 ## Summary
 
-Build the fs-explorer as the core navigation and analysis surface for HD Analyzer. The work introduces a Rust `hd-driver` contract in `hd-analyzer-core` for volume listing, cached directory discovery, rule-driven scan jobs, invalidation, and progress snapshots. The Tauri v2 layer will expose this driver through commands plus channel-based streaming updates, while the React/shadcn frontend will render only the explorer surface: volumes, grouped breadcrumb navigation, clickable table rows, and per-row working indicators.
+Build the fs-explorer as the core navigation and analysis surface for Space Lenser. The work introduces a Rust `hd-driver` contract in `space-lenser-core` for volume listing, cached directory discovery, rule-driven scan jobs, invalidation, and progress snapshots. The Tauri v2 layer will expose this driver through commands plus channel-based streaming updates, while the React/shadcn frontend will render only the explorer surface: volumes, grouped breadcrumb navigation, clickable table rows, and per-row working indicators.
 
 The scanner will replace the current full-result flow with asynchronous path jobs backed by `jwalk`, platform-specific allocated-size measurement, global hard-link deduplication, and honest progress accounting for discovered, scheduled, completed, skipped, failed, and canceled work.
 
@@ -82,7 +82,7 @@ specs/002-fs-explorer-driver/
 ### Source Code (repository root)
 
 ```text
-crates/hd-analyzer-core/src/
+crates/space-lenser-core/src/
 ├── cache.rs              # Per-path directory cache and freshness state
 ├── driver.rs             # HdDriver/AnalysisProvider contract and orchestration
 ├── drives.rs             # Volume discovery using sysinfo
@@ -113,7 +113,7 @@ src-web/src/
 └── App.tsx               # Mount fs-explorer and existing Permissions button
 ```
 
-**Structure Decision**: Keep filesystem correctness and scan orchestration in `hd-analyzer-core`; keep Tauri as a thin transport/state boundary; keep React state and cache behavior in a feature-scoped `fs-explorer` directory using existing shadcn components.
+**Structure Decision**: Keep filesystem correctness and scan orchestration in `space-lenser-core`; keep Tauri as a thin transport/state boundary; keep React state and cache behavior in a feature-scoped `fs-explorer` directory using existing shadcn components.
 
 ## Complexity Tracking
 
