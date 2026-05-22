@@ -2,7 +2,13 @@
 
 A Tauri desktop disk usage analyzer built with Rust, React, and shadcn/ui.
 
-![Space Lenser logo](src-web/public/logo.png)
+<p align="center">
+  <img src="assets/logo-type.png" alt="Space Lenser logo" width="420" />
+</p>
+
+<p align="center">
+  <img src="assets/app-screen.png" alt="Space Lenser desktop app screenshot" />
+</p>
 
 ## Overview
 
