@@ -6,6 +6,7 @@ import type { VisualizerLevelSnapshot } from "./types"
 import { Honeycomb } from "./honeycomb"
 import { LegendVisualizer } from "./legend-visualizer"
 import { Voronoi } from "./voronoi"
+import { visualizerColor } from "@/file-colors"
 import { isToggleSelectionInput, replaceSelection, toggleSelection } from "@/lib/selection"
 import type { ColorScheme } from "@/lib/use-system-color-scheme"
 import type { VisualizerLayoutCell } from "./voronoi"
@@ -21,9 +22,8 @@ type VisualizerProps = {
 const honeycomb = new Honeycomb()
 const VISUALIZER_RESIZE_DEBOUNCE_MS = 100
 const SELECTION_HIGHLIGHT_FADE_MS = 140
-const RESIZE_OVERLAY_FADE_MS = 160
+const RESIZE_OVERLAY_FADE_MS = 250
 const RESIZE_LABEL_FADE_MS = 140
-const RESIZE_PLACEHOLDER_FILL = "hsl(0 0% 100% / 0.06)"
 
 type MotionControls = {
   stop: () => void
@@ -286,7 +286,7 @@ export function Visualizer({
           onExplorerSelectionAnchorChange(nextSelection[0] ?? null)
         }}
       />
-      <LegendVisualizer colorScheme={colorScheme} items={snapshot.items} />
+      <LegendVisualizer items={snapshot.items} />
       <div className="pointer-events-none absolute bottom-3 right-3 select-none font-mono text-[0.6875rem] text-muted-foreground/55">
         v{__APP_VERSION__}
       </div>
@@ -428,7 +428,7 @@ function drawPlaceholderCircle(
   context.save()
   context.beginPath()
   context.arc(width / 2, height / 2, radius, 0, Math.PI * 2)
-  context.fillStyle = RESIZE_PLACEHOLDER_FILL
+  context.fillStyle = visualizerColor("placeholderFill")
   context.globalAlpha = clamp(opacity, 0, 1)
   context.fill()
   context.restore()

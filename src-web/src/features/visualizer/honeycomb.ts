@@ -4,7 +4,7 @@ import {
   insetConvexPolygon,
   polygonAbsArea,
 } from "./clipper"
-import { adjustColorForTheme } from "@/file-colors"
+import { adjustColorForTheme, mixHslColors, visualizerColor } from "@/file-colors"
 import type { ColorScheme } from "@/lib/use-system-color-scheme"
 import type { VisualizerLayout, VisualizerLayoutCell, VisualizerPoint } from "./voronoi"
 
@@ -20,7 +20,6 @@ export const HONEYCOMB_MAX_RESAMPLE_POINTS = 24
 export const HONEYCOMB_SMALL_RADIUS = 8
 export const HONEYCOMB_LARGE_RADIUS = 48
 export const HONEYCOMB_DEBUG_INSET = false
-export const LABEL_COLOR = "hsl(0 0% 100% / 0.86)"
 export const LABEL_FONT_SIZE_MIN = 9
 export const LABEL_FONT_SIZE_MAX = 13
 export const LABEL_VISIBILITY_THRESHOLD = 0.006
@@ -30,7 +29,6 @@ const SMOOTH_EPSILON = 0.000001
 const LABEL_AREA_RATIO = 0.82
 const LABEL_HEIGHT_RATIO = 0.78
 const LABEL_LINE_HEIGHT = 1.15
-const HONEYCOMB_FALLBACK_STROKE = "hsl(0 0% 100% / 0.24)"
 const HONEYCOMB_BORDER_LIGHTNESS_DELTA = 10
 const HONEYCOMB_SELECTED_FILL_LIGHTNESS_DELTA = 10
 const HONEYCOMB_SELECTED_BORDER_LIGHTNESS_DELTA = 24
@@ -60,6 +58,12 @@ type HoneycombCellStyle = {
   separation: number
   smooth: number
   resampleSpacing: number
+}
+
+type HoneycombDrawStyle = {
+  fill: string
+  lineWidth: number
+  stroke: string
 }
 
 export class Honeycomb {
@@ -137,7 +141,7 @@ function drawHoneycombCell(
   }
 
   drawSmoothCell(context, cell, options, inset, style, selectionProgress)
-  drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea, options.labelOpacity)
+  drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea, options)
 }
 
 function resolveCellHitGeometry(cell: VisualizerLayoutCell, options: ResolvedHoneycombOptions) {
@@ -180,7 +184,7 @@ function resolveCellDrawStyle(
   cell: VisualizerLayoutCell,
   options: ResolvedHoneycombOptions,
   selected: boolean,
-) {
+): HoneycombDrawStyle {
   if (!selected) {
     return {
       fill: cell.fillColor,
@@ -196,6 +200,29 @@ function resolveCellDrawStyle(
   }
 }
 
+function resolveAnimatedCellDrawStyle(
+  cell: VisualizerLayoutCell,
+  options: ResolvedHoneycombOptions,
+  selectionProgress: number | undefined,
+) {
+  const baseStyle = resolveCellDrawStyle(cell, options, false)
+  if (selectionProgress === undefined) {
+    return baseStyle
+  }
+
+  const selectedStyle = resolveCellDrawStyle(cell, options, true)
+  if (selectionProgress >= 1) {
+    return selectedStyle
+  }
+
+  const progress = clamp(selectionProgress, 0, 1)
+  return {
+    fill: mixHslColors(baseStyle.fill, selectedStyle.fill, progress) ?? baseStyle.fill,
+    lineWidth: lerpNumber(baseStyle.lineWidth, selectedStyle.lineWidth, progress),
+    stroke: mixHslColors(baseStyle.stroke, selectedStyle.stroke, progress) ?? baseStyle.stroke,
+  }
+}
+
 function drawSmoothCell(
   context: CanvasRenderingContext2D,
   cell: VisualizerLayoutCell,
@@ -204,41 +231,15 @@ function drawSmoothCell(
   style: HoneycombCellStyle,
   selectionProgress: number | undefined,
 ) {
-  if (selectionProgress === undefined || selectionProgress >= 1) {
-    const cellStyle = resolveCellDrawStyle(cell, options, selectionProgress !== undefined)
-    drawSmoothPolygon(
-      context,
-      inset,
-      cellStyle.fill,
-      cellStyle.stroke,
-      style.smooth,
-      style.resampleSpacing,
-      cellStyle.lineWidth,
-    )
-    return
-  }
-
-  const baseStyle = resolveCellDrawStyle(cell, options, false)
+  const cellStyle = resolveAnimatedCellDrawStyle(cell, options, selectionProgress)
   drawSmoothPolygon(
     context,
     inset,
-    baseStyle.fill,
-    baseStyle.stroke,
+    cellStyle.fill,
+    cellStyle.stroke,
     style.smooth,
     style.resampleSpacing,
-    baseStyle.lineWidth,
-  )
-
-  const selectedStyle = resolveCellDrawStyle(cell, options, true)
-  drawSmoothPolygon(
-    context,
-    inset,
-    selectedStyle.fill,
-    selectedStyle.stroke,
-    style.smooth,
-    style.resampleSpacing,
-    selectedStyle.lineWidth,
-    0.92 * selectionProgress,
+    cellStyle.lineWidth,
   )
 }
 
@@ -254,16 +255,8 @@ function drawInscribedCircle(
     return
   }
 
-  if (selectionProgress === undefined || selectionProgress >= 1) {
-    const cellStyle = resolveCellDrawStyle(cell, options, selectionProgress !== undefined)
-    drawCircleShape(context, circle, cellStyle, 0.92)
-    drawCellLabel(context, cell, circle, layoutCircleArea, options.labelOpacity)
-    return
-  }
-
-  drawCircleShape(context, circle, resolveCellDrawStyle(cell, options, false), 0.92)
-  drawCircleShape(context, circle, resolveCellDrawStyle(cell, options, true), 0.92 * selectionProgress)
-  drawCellLabel(context, cell, circle, layoutCircleArea, options.labelOpacity)
+  drawCircleShape(context, circle, resolveAnimatedCellDrawStyle(cell, options, selectionProgress), 0.92)
+  drawCellLabel(context, cell, circle, layoutCircleArea, options)
 }
 
 function drawCircleShape(
@@ -289,10 +282,10 @@ function drawCellLabel(
   cell: VisualizerLayoutCell,
   circle: { center: VisualizerPoint; radius: number },
   layoutCircleArea: number,
-  labelOpacity = 1,
+  options: ResolvedHoneycombOptions,
 ) {
   const circleArea = Math.PI * circle.radius ** 2
-  const opacity = clamp(labelOpacity, 0, 1)
+  const opacity = clamp(options.labelOpacity, 0, 1)
   if (
     opacity <= 0.001 ||
     circle.radius <= 0 ||
@@ -322,7 +315,7 @@ function drawCellLabel(
     return
   }
 
-  context.fillStyle = LABEL_COLOR
+  context.fillStyle = visualizerColor("label")
   context.globalAlpha = opacity
   context.textAlign = "center"
   context.textBaseline = "middle"
@@ -449,7 +442,7 @@ function drawInsetDebug(
     context.lineTo(x, y)
   })
   context.closePath()
-  context.strokeStyle = "hsl(180 100% 55% / 0.8)"
+  context.strokeStyle = visualizerColor("fallbackStroke")
   context.lineWidth = 1
   context.stroke()
 
@@ -461,7 +454,7 @@ function drawInsetDebug(
 
     context.beginPath()
     context.arc(point[0], point[1], 2.5, 0, Math.PI * 2)
-    context.fillStyle = "hsl(0 100% 55% / 0.9)"
+    context.fillStyle = visualizerColor("fallbackStroke")
     context.fill()
   })
 
@@ -690,7 +683,10 @@ function selectedCellCandidateIds(cell: VisualizerLayoutCell) {
 }
 
 function borderColorForCell(fillStyle: string, colorScheme: ColorScheme) {
-  return adjustColorForTheme(fillStyle, colorScheme, HONEYCOMB_BORDER_LIGHTNESS_DELTA) ?? HONEYCOMB_FALLBACK_STROKE
+  return (
+    adjustColorForTheme(fillStyle, colorScheme, HONEYCOMB_BORDER_LIGHTNESS_DELTA) ??
+    visualizerColor("fallbackStroke")
+  )
 }
 
 function selectedFillColorForCell(fillStyle: string, colorScheme: ColorScheme) {
@@ -700,7 +696,7 @@ function selectedFillColorForCell(fillStyle: string, colorScheme: ColorScheme) {
 function selectedBorderColorForCell(fillStyle: string, colorScheme: ColorScheme) {
   return (
     adjustColorForTheme(fillStyle, colorScheme, HONEYCOMB_SELECTED_BORDER_LIGHTNESS_DELTA) ??
-    HONEYCOMB_FALLBACK_STROKE
+    visualizerColor("fallbackStroke")
   )
 }
 

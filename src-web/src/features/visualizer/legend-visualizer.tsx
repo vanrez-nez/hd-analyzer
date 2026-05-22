@@ -1,10 +1,8 @@
 import { fileColorForGroup, fileColorGroupForInput } from "@/file-colors"
 import type { FileColorGroup } from "@/file-colors"
-import type { ColorScheme } from "@/lib/use-system-color-scheme"
 import type { VisualizerCellInput } from "./types"
 
 type LegendVisualizerProps = {
-  colorScheme: ColorScheme
   items: VisualizerCellInput[]
 }
 
@@ -22,7 +20,7 @@ const LEGEND_LABELS: Record<FileColorGroup, string> = {
   document: "Documents",
 }
 
-export function LegendVisualizer({ colorScheme, items }: LegendVisualizerProps) {
+export function LegendVisualizer({ items }: LegendVisualizerProps) {
   const legendItems = buildLegendItems(items)
   if (legendItems.length === 0) {
     return null
@@ -39,7 +37,7 @@ export function LegendVisualizer({ colorScheme, items }: LegendVisualizerProps) 
           <span
             aria-hidden="true"
             className="size-2.5 shrink-0 rounded-[2px]"
-            style={{ backgroundColor: fileColorForGroup(item.group, colorScheme) }}
+            style={{ backgroundColor: fileColorForGroup(item.group) }}
           />
         </div>
       ))}

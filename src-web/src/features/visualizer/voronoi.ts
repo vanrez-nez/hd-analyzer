@@ -4,6 +4,7 @@ import {
   fileColorForGroup,
   fileColorGroupForInput,
   fileExtension,
+  visualizerColor,
 } from "@/file-colors"
 import type { FileColorGroup } from "@/file-colors"
 import type { ColorScheme } from "@/lib/use-system-color-scheme"
@@ -217,7 +218,7 @@ function createLayout(
     path: snapshot.path,
     colorScheme,
     circle,
-    cells: renderCells.map((cell) => createLayoutCell(cell, colorScheme)),
+    cells: renderCells.map(createLayoutCell),
   }
 }
 
@@ -314,7 +315,7 @@ function createRenderCell(site: VoronoiSite, polygon: VoronoiPoint[], item?: Fil
   }
 }
 
-function createLayoutCell(cell: RenderCell, colorScheme: ColorScheme): VisualizerLayoutCell {
+function createLayoutCell(cell: RenderCell): VisualizerLayoutCell {
   const source = cell.item?.source ?? cell.site.representative.source
   const colorGroup = colorGroupForRenderCell(cell)
   const directItem = cell.site.overflowReason ? undefined : cell.item
@@ -331,7 +332,7 @@ function createLayoutCell(cell: RenderCell, colorScheme: ColorScheme): Visualize
     state: source.state,
     polygon: cell.polygon.map(([x, y]): VisualizerPoint => [x, y]),
     colorGroup,
-    fillColor: fileColorForGroup(colorGroup, colorScheme),
+    fillColor: fileColorForGroup(colorGroup),
   }
 }
 
@@ -954,7 +955,7 @@ function createCircleBoundary(circle: CircleBounds) {
 function drawCircleBackground(context: CanvasRenderingContext2D, circle: CircleBounds) {
   context.save()
   drawCirclePath(context, circle)
-  context.fillStyle = "hsl(0 0% 0% / 0.02)"
+  context.fillStyle = visualizerColor("circleBackground")
   context.fill()
   context.restore()
 }
@@ -962,7 +963,7 @@ function drawCircleBackground(context: CanvasRenderingContext2D, circle: CircleB
 function drawCircleFrame(context: CanvasRenderingContext2D, circle: CircleBounds) {
   context.save()
   drawCirclePath(context, circle)
-  context.strokeStyle = "hsl(0 0% 100% / 0.16)"
+  context.strokeStyle = visualizerColor("circleFrame")
   context.lineWidth = CIRCLE_FRAME_STROKE_WIDTH
   context.stroke()
   context.restore()
@@ -980,7 +981,11 @@ function drawContainedCells(
   context.restore()
 }
 
-function drawPolygon(context: CanvasRenderingContext2D, polygon: VoronoiPoint[], fillStyle: string) {
+function drawPolygon(
+  context: CanvasRenderingContext2D,
+  polygon: VoronoiPoint[],
+  fillStyle: string,
+) {
   if (polygon.length === 0) {
     return
   }
@@ -997,7 +1002,7 @@ function drawPolygon(context: CanvasRenderingContext2D, polygon: VoronoiPoint[],
   context.closePath()
   context.fillStyle = fillStyle
   context.fill()
-  context.strokeStyle = "hsl(0 0% 100% / 0.12)"
+  context.strokeStyle = visualizerColor("fallbackStroke")
   context.lineWidth = 1
   context.stroke()
 }

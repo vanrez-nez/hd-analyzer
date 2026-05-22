@@ -1,11 +1,24 @@
 import type { ColorScheme } from "@/lib/use-system-color-scheme"
 
 export type FileColorGroup = "file" | "folder" | "audio" | "video" | "document"
+export type VisualizerColorToken =
+  | "circleBackground"
+  | "circleFrame"
+  | "fallbackStroke"
+  | "label"
+  | "placeholderFill"
 
 type FileColorInput = {
   kind: "volume" | "directory" | "file" | "other"
   label: string
   path: string
+}
+
+type HslColor = {
+  alpha: number
+  hue: number
+  lightness: number
+  saturation: number
 }
 
 const AUDIO_EXTENSIONS = new Set([
@@ -59,21 +72,20 @@ const DOCUMENT_EXTENSIONS = new Set([
   "xlsx",
 ])
 
-export const FILE_GROUP_COLORS: Record<ColorScheme, Record<FileColorGroup, string>> = {
-  light: {
-    folder: "hsl(205 46% 42% / 0.58)",
-    audio: "hsl(150 36% 38% / 0.56)",
-    video: "hsl(8 48% 42% / 0.56)",
-    document: "hsl(38 48% 43% / 0.56)",
-    file: "hsl(220 10% 42% / 0.50)",
-  },
-  dark: {
-    folder: "hsl(205 62% 58% / 0.64)",
-    audio: "hsl(150 48% 52% / 0.62)",
-    video: "hsl(8 66% 60% / 0.62)",
-    document: "hsl(38 72% 58% / 0.62)",
-    file: "hsl(220 12% 66% / 0.54)",
-  },
+const FILE_GROUP_COLOR_VARIABLES: Record<FileColorGroup, string> = {
+  folder: "--visualizer-group-folder",
+  audio: "--visualizer-group-audio",
+  video: "--visualizer-group-video",
+  document: "--visualizer-group-document",
+  file: "--visualizer-group-file",
+}
+
+const VISUALIZER_COLOR_VARIABLES: Record<VisualizerColorToken, string> = {
+  circleBackground: "--visualizer-circle-background",
+  circleFrame: "--visualizer-circle-frame",
+  fallbackStroke: "--visualizer-fallback-stroke",
+  label: "--visualizer-label",
+  placeholderFill: "--visualizer-placeholder-fill",
 }
 
 export function fileExtension(value: string) {
@@ -114,8 +126,20 @@ export function fileColorGroupForExtension(extension: string): FileColorGroup {
   return "file"
 }
 
-export function fileColorForGroup(group: FileColorGroup, colorScheme: ColorScheme) {
-  return FILE_GROUP_COLORS[colorScheme][group]
+export function fileColorForGroup(group: FileColorGroup) {
+  return readCssColorVariable(FILE_GROUP_COLOR_VARIABLES[group])
+}
+
+export function visualizerColor(token: VisualizerColorToken) {
+  return readCssColorVariable(VISUALIZER_COLOR_VARIABLES[token])
+}
+
+function readCssColorVariable(name: string) {
+  if (typeof window === "undefined") {
+    return ""
+  }
+
+  return window.getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
 
 export function adjustColorForTheme(value: string, colorScheme: ColorScheme, lightnessAmount: number) {
@@ -126,10 +150,28 @@ export function adjustColorForTheme(value: string, colorScheme: ColorScheme, lig
 
   const lightnessAdjustment = colorScheme === "dark" ? lightnessAmount : -lightnessAmount
   const lightness = clamp(color.lightness + lightnessAdjustment, 0, 100)
-  return `hsl(${color.hue} ${color.saturation}% ${lightness}% / ${color.alpha})`
+  return formatHslColor({ ...color, lightness })
 }
 
-function parseHslColor(value: string) {
+export function mixHslColors(from: string, to: string, amount: number) {
+  const fromColor = parseHslColor(from)
+  const toColor = parseHslColor(to)
+  if (!fromColor || !toColor) {
+    return undefined
+  }
+
+  const progress = clamp(amount, 0, 1)
+  const hueDelta = shortestHueDelta(fromColor.hue, toColor.hue)
+
+  return formatHslColor({
+    alpha: lerpNumber(fromColor.alpha, toColor.alpha, progress),
+    hue: normalizeHue(fromColor.hue + hueDelta * progress),
+    lightness: lerpNumber(fromColor.lightness, toColor.lightness, progress),
+    saturation: lerpNumber(fromColor.saturation, toColor.saturation, progress),
+  })
+}
+
+function parseHslColor(value: string): HslColor | undefined {
   const match = value
     .trim()
     .match(/^hsl\(\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)%\s+([-+]?\d*\.?\d+)%(?:\s*\/\s*([^)]+?))?\s*\)$/)
@@ -141,17 +183,49 @@ function parseHslColor(value: string) {
   const hue = Number.parseFloat(match[1])
   const saturation = Number.parseFloat(match[2])
   const lightness = Number.parseFloat(match[3])
-  const alpha = match[4]?.trim() || "1"
-  if (![hue, saturation, lightness].every(Number.isFinite)) {
+  const alpha = parseAlpha(match[4]?.trim())
+  if (![hue, saturation, lightness, alpha].every(Number.isFinite)) {
     return undefined
   }
 
   return {
-    alpha,
-    hue,
-    lightness,
-    saturation,
+    alpha: clamp(alpha, 0, 1),
+    hue: normalizeHue(hue),
+    lightness: clamp(lightness, 0, 100),
+    saturation: clamp(saturation, 0, 100),
   }
+}
+
+function parseAlpha(value: string | undefined) {
+  if (!value) {
+    return 1
+  }
+
+  if (value.endsWith("%")) {
+    return Number.parseFloat(value) / 100
+  }
+
+  return Number.parseFloat(value)
+}
+
+function formatHslColor(color: HslColor) {
+  return `hsl(${formatNumber(color.hue)} ${formatNumber(color.saturation)}% ${formatNumber(color.lightness)}% / ${formatNumber(color.alpha)})`
+}
+
+function formatNumber(value: number) {
+  return Number.parseFloat(value.toFixed(3)).toString()
+}
+
+function normalizeHue(value: number) {
+  return ((value % 360) + 360) % 360
+}
+
+function shortestHueDelta(from: number, to: number) {
+  return ((to - from + 540) % 360) - 180
+}
+
+function lerpNumber(from: number, to: number, amount: number) {
+  return from + (to - from) * amount
 }
 
 function clamp(value: number, min: number, max: number) {
