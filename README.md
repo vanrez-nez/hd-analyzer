@@ -2,7 +2,7 @@
 
 A Tauri desktop disk usage analyzer built with Rust, React, and shadcn/ui.
 
-![HD Analyzer logo](src-web/public/logo.svg)
+![HD Analyzer logo](src-web/public/logo.png)
 
 ## Overview
 
