@@ -38,6 +38,7 @@ const HONEYCOMB_SELECTED_STROKE_WIDTH = 2
 
 type HoneycombOptions = {
   colorScheme?: ColorScheme
+  labelOpacity?: number
   minCellArea?: number
   selectedItemIds?: readonly string[]
   selectionProgressById?: ReadonlyMap<string, number>
@@ -50,6 +51,7 @@ type ResolvedHoneycombOptions = {
   minCellArea: number
   maxSeparation: number
   maxSmooth: number
+  labelOpacity: number
   selectedItemIds: Set<string>
   selectionProgressById: ReadonlyMap<string, number>
 }
@@ -135,7 +137,7 @@ function drawHoneycombCell(
   }
 
   drawSmoothCell(context, cell, options, inset, style, selectionProgress)
-  drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea)
+  drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea, options.labelOpacity)
 }
 
 function resolveCellHitGeometry(cell: VisualizerLayoutCell, options: ResolvedHoneycombOptions) {
@@ -255,13 +257,13 @@ function drawInscribedCircle(
   if (selectionProgress === undefined || selectionProgress >= 1) {
     const cellStyle = resolveCellDrawStyle(cell, options, selectionProgress !== undefined)
     drawCircleShape(context, circle, cellStyle, 0.92)
-    drawCellLabel(context, cell, circle, layoutCircleArea)
+    drawCellLabel(context, cell, circle, layoutCircleArea, options.labelOpacity)
     return
   }
 
   drawCircleShape(context, circle, resolveCellDrawStyle(cell, options, false), 0.92)
   drawCircleShape(context, circle, resolveCellDrawStyle(cell, options, true), 0.92 * selectionProgress)
-  drawCellLabel(context, cell, circle, layoutCircleArea)
+  drawCellLabel(context, cell, circle, layoutCircleArea, options.labelOpacity)
 }
 
 function drawCircleShape(
@@ -287,9 +289,12 @@ function drawCellLabel(
   cell: VisualizerLayoutCell,
   circle: { center: VisualizerPoint; radius: number },
   layoutCircleArea: number,
+  labelOpacity = 1,
 ) {
   const circleArea = Math.PI * circle.radius ** 2
+  const opacity = clamp(labelOpacity, 0, 1)
   if (
+    opacity <= 0.001 ||
     circle.radius <= 0 ||
     !Number.isFinite(layoutCircleArea) ||
     circleArea / layoutCircleArea < LABEL_VISIBILITY_THRESHOLD
@@ -318,7 +323,7 @@ function drawCellLabel(
   }
 
   context.fillStyle = LABEL_COLOR
-  context.globalAlpha = 1
+  context.globalAlpha = opacity
   context.textAlign = "center"
   context.textBaseline = "middle"
   context.fillText(name, circle.center[0], circle.center[1] - lineHeight / 2)
@@ -597,6 +602,7 @@ function resolveOptions(options: HoneycombOptions): ResolvedHoneycombOptions {
     minCellArea: Math.max(0, options.minCellArea ?? HONEYCOMB_MIN_CELL_AREA),
     maxSeparation,
     maxSmooth: clamp(options.smooth ?? HONEYCOMB_MAX_SMOOTH, 0, 1),
+    labelOpacity: clamp(options.labelOpacity ?? 1, 0, 1),
     selectedItemIds: new Set(options.selectedItemIds ?? []),
     selectionProgressById: options.selectionProgressById ?? new Map<string, number>(),
   }

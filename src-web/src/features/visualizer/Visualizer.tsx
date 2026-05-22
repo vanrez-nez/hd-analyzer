@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { MouseEvent, MutableRefObject } from "react"
+import { animate } from "motion"
 
 import type { VisualizerLevelSnapshot } from "./types"
 import { Honeycomb } from "./honeycomb"
@@ -20,6 +21,20 @@ type VisualizerProps = {
 const honeycomb = new Honeycomb()
 const VISUALIZER_RESIZE_DEBOUNCE_MS = 100
 const SELECTION_HIGHLIGHT_FADE_MS = 140
+const RESIZE_OVERLAY_FADE_MS = 160
+const RESIZE_LABEL_FADE_MS = 140
+const RESIZE_PLACEHOLDER_FILL = "hsl(0 0% 100% / 0.06)"
+
+type MotionControls = {
+  stop: () => void
+}
+
+type VisualizerDrawState = {
+  cellsVisible: boolean
+  labelOpacity: number
+  overlayOpacity: number
+  placeholderVisible: boolean
+}
 
 export function Visualizer({
   colorScheme,
@@ -34,68 +49,195 @@ export function Visualizer({
   const snapshotRef = useRef(snapshot)
   const colorSchemeRef = useRef(colorScheme)
   const selectedItemIdsRef = useRef(selectedItemIds)
-  const selectionFadeFrameRef = useRef<number | undefined>(undefined)
-  const selectionFadeStartByIdRef = useRef<Map<string, number>>(new Map())
+  const drawStateRef = useRef<VisualizerDrawState>({
+    cellsVisible: true,
+    labelOpacity: 1,
+    overlayOpacity: 0,
+    placeholderVisible: false,
+  })
+  const observedWrapperSizeRef = useRef("")
+  const resizeLabelAnimationRef = useRef<MotionControls | undefined>(undefined)
+  const resizeOverlayAnimationRef = useRef<MotionControls | undefined>(undefined)
+  const selectionAnimationRef = useRef<MotionControls | undefined>(undefined)
+  const selectionProgressByIdRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     const previousSelectedItemIds = new Set(selectedItemIdsRef.current)
     const nextSelectedItemIds = new Set(selectedItemIds)
-    const now = performance.now()
-
-    selectionFadeStartByIdRef.current.forEach((_startedAt, itemId) => {
-      if (!nextSelectedItemIds.has(itemId)) {
-        selectionFadeStartByIdRef.current.delete(itemId)
-      }
-    })
-
-    selectedItemIds.forEach((itemId) => {
-      if (!previousSelectedItemIds.has(itemId)) {
-        selectionFadeStartByIdRef.current.set(itemId, now)
-      }
-    })
 
     snapshotRef.current = snapshot
     colorSchemeRef.current = colorScheme
     selectedItemIdsRef.current = selectedItemIds
-    drawCurrentVisualizerFrame(now)
-    scheduleSelectionFade()
-  }, [colorScheme, selectedItemIds, snapshot])
 
-  const drawCurrentVisualizerFrame = (frameTime = performance.now()) => {
-    drawVisualizer(
-      canvasRef.current,
-      wrapperRef.current,
-      voronoiRef,
-      snapshotRef.current,
-      colorSchemeRef.current,
-      selectedItemIdsRef.current,
-      selectionProgressById(selectedItemIdsRef.current, selectionFadeStartByIdRef.current, frameTime),
-    )
-  }
+    selectionProgressByIdRef.current.forEach((_progress, itemId) => {
+      if (!nextSelectedItemIds.has(itemId)) {
+        selectionProgressByIdRef.current.delete(itemId)
+      }
+    })
 
-  const scheduleSelectionFade = () => {
-    if (selectionFadeFrameRef.current !== undefined || selectionFadeStartByIdRef.current.size === 0) {
-      return
+    const newlySelectedItemIds: string[] = []
+    selectedItemIds.forEach((itemId) => {
+      if (!previousSelectedItemIds.has(itemId)) {
+        selectionProgressByIdRef.current.set(itemId, 0)
+        newlySelectedItemIds.push(itemId)
+      }
+    })
+
+    if (selectionProgressByIdRef.current.size === 0) {
+      selectionAnimationRef.current?.stop()
+      selectionAnimationRef.current = undefined
+    } else if (newlySelectedItemIds.length > 0) {
+      startSelectionAnimation()
     }
 
-    selectionFadeFrameRef.current = window.requestAnimationFrame((frameTime) => {
-      selectionFadeFrameRef.current = undefined
-      drawCurrentVisualizerFrame(frameTime)
-      scheduleSelectionFade()
+    drawCurrentVisualizerFrame()
+  }, [colorScheme, selectedItemIds, snapshot])
+
+  const drawCurrentVisualizerFrame = () => {
+    const drawState = drawStateRef.current
+    if (!drawState.cellsVisible) {
+      drawResizePlaceholder(canvasRef.current, wrapperRef.current, drawState.overlayOpacity)
+    } else {
+      drawVisualizer(
+        canvasRef.current,
+        wrapperRef.current,
+        voronoiRef,
+        snapshotRef.current,
+        colorSchemeRef.current,
+        selectedItemIdsRef.current,
+        selectionProgressByIdRef.current,
+        drawState,
+      )
+    }
+  }
+
+  const startSelectionAnimation = () => {
+    selectionAnimationRef.current?.stop()
+    const startProgressById = new Map(selectionProgressByIdRef.current)
+
+    const animation = animate(0, 1, {
+      duration: SELECTION_HIGHLIGHT_FADE_MS / 1000,
+      ease: "easeOut",
+      onUpdate: (progress) => {
+        const selectedItemIdSet = new Set(selectedItemIdsRef.current)
+        startProgressById.forEach((startProgress, itemId) => {
+          if (!selectedItemIdSet.has(itemId)) {
+            return
+          }
+
+          selectionProgressByIdRef.current.set(itemId, startProgress + (1 - startProgress) * progress)
+        })
+        drawCurrentVisualizerFrame()
+      },
+      onComplete: () => {
+        if (selectionAnimationRef.current !== animation) {
+          return
+        }
+
+        selectionAnimationRef.current = undefined
+        startProgressById.forEach((_progress, itemId) => {
+          selectionProgressByIdRef.current.delete(itemId)
+        })
+        drawCurrentVisualizerFrame()
+      },
     })
+
+    selectionAnimationRef.current = animation
+  }
+
+  const stopResizeAnimations = () => {
+    resizeOverlayAnimationRef.current?.stop()
+    resizeOverlayAnimationRef.current = undefined
+    resizeLabelAnimationRef.current?.stop()
+    resizeLabelAnimationRef.current = undefined
+  }
+
+  const startResizeLabelReveal = () => {
+    resizeLabelAnimationRef.current?.stop()
+    drawStateRef.current.labelOpacity = 0
+
+    const animation = animate(0, 1, {
+      duration: RESIZE_LABEL_FADE_MS / 1000,
+      ease: "easeOut",
+      onUpdate: (opacity) => {
+        drawStateRef.current.labelOpacity = opacity
+        drawCurrentVisualizerFrame()
+      },
+      onComplete: () => {
+        if (resizeLabelAnimationRef.current !== animation) {
+          return
+        }
+
+        resizeLabelAnimationRef.current = undefined
+        drawStateRef.current.labelOpacity = 1
+        drawCurrentVisualizerFrame()
+      },
+    })
+
+    resizeLabelAnimationRef.current = animation
+  }
+
+  const startResizeReveal = () => {
+    stopResizeAnimations()
+    drawStateRef.current = {
+      cellsVisible: true,
+      labelOpacity: 0,
+      overlayOpacity: 1,
+      placeholderVisible: true,
+    }
+    drawCurrentVisualizerFrame()
+
+    const animation = animate(1, 0, {
+      duration: RESIZE_OVERLAY_FADE_MS / 1000,
+      ease: "easeOut",
+      onUpdate: (opacity) => {
+        drawStateRef.current.overlayOpacity = opacity
+        drawStateRef.current.placeholderVisible = opacity > 0.001
+        drawCurrentVisualizerFrame()
+      },
+      onComplete: () => {
+        if (resizeOverlayAnimationRef.current !== animation) {
+          return
+        }
+
+        resizeOverlayAnimationRef.current = undefined
+        drawStateRef.current.overlayOpacity = 0
+        drawStateRef.current.placeholderVisible = false
+        drawCurrentVisualizerFrame()
+        startResizeLabelReveal()
+      },
+    })
+
+    resizeOverlayAnimationRef.current = animation
   }
 
   useEffect(() => {
     let resizeTimeout: number | undefined
     const scheduleRedraw = () => {
+      const wrapper = wrapperRef.current
+      const sizeKey = wrapper ? `${wrapper.clientWidth}x${wrapper.clientHeight}` : ""
+      if (sizeKey === observedWrapperSizeRef.current) {
+        return
+      }
+
+      observedWrapperSizeRef.current = sizeKey
+      stopResizeAnimations()
+      drawStateRef.current = {
+        cellsVisible: false,
+        labelOpacity: 0,
+        overlayOpacity: 1,
+        placeholderVisible: true,
+      }
+      voronoiRef.current = undefined
+      drawResizePlaceholder(canvasRef.current, wrapperRef.current, 1)
       window.clearTimeout(resizeTimeout)
       resizeTimeout = window.setTimeout(() => {
-        drawCurrentVisualizerFrame()
-        scheduleSelectionFade()
+        startResizeReveal()
       }, VISUALIZER_RESIZE_DEBOUNCE_MS)
     }
 
     const wrapper = wrapperRef.current
+    observedWrapperSizeRef.current = wrapper ? `${wrapper.clientWidth}x${wrapper.clientHeight}` : ""
     const resizeObserver = wrapper ? new ResizeObserver(scheduleRedraw) : undefined
     if (wrapper) {
       resizeObserver?.observe(wrapper)
@@ -104,10 +246,18 @@ export function Visualizer({
     window.addEventListener("resize", scheduleRedraw)
     return () => {
       window.clearTimeout(resizeTimeout)
-      window.cancelAnimationFrame(selectionFadeFrameRef.current ?? 0)
-      selectionFadeFrameRef.current = undefined
+      stopResizeAnimations()
       resizeObserver?.disconnect()
       window.removeEventListener("resize", scheduleRedraw)
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      stopResizeAnimations()
+      selectionAnimationRef.current?.stop()
+      selectionAnimationRef.current = undefined
+      selectionProgressByIdRef.current.clear()
     }
   }, [])
 
@@ -152,19 +302,48 @@ function drawVisualizer(
   colorScheme: ColorScheme,
   selectedItemIds: string[],
   selectionProgressById?: ReadonlyMap<string, number>,
+  drawState?: VisualizerDrawState,
 ) {
   const renderState = prepareVisualizer(canvas, wrapper, voronoiRef, snapshot, colorScheme)
   if (!renderState) {
     return false
   }
 
-  const { context, layout, scaleX, scaleY, voronoi } = renderState
+  const { context, height, layout, scaleX, scaleY, voronoi, width } = renderState
   context.setTransform(scaleX, 0, 0, scaleY, 0, 0)
   voronoi.drawBackground(context)
   // voronoi.drawDebugBase(context, layout)
-  honeycomb.draw(context, layout, { colorScheme, selectedItemIds, selectionProgressById })
+  if (drawState?.cellsVisible ?? true) {
+    context.save()
+    honeycomb.draw(context, layout, {
+      colorScheme,
+      labelOpacity: drawState?.labelOpacity ?? 1,
+      selectedItemIds,
+      selectionProgressById,
+    })
+    context.restore()
+  }
   voronoi.drawFrame(context, layout)
+  if (drawState?.placeholderVisible && drawState.overlayOpacity > 0) {
+    drawPlaceholderCircle(context, width, height, drawState.overlayOpacity)
+  }
   return false
+}
+
+function drawResizePlaceholder(
+  canvas: HTMLCanvasElement | null,
+  wrapper: HTMLDivElement | null,
+  opacity: number,
+) {
+  const renderState = prepareCanvas(canvas, wrapper)
+  if (!renderState) {
+    return
+  }
+
+  const { context, height, scaleX, scaleY, width } = renderState
+  context.setTransform(scaleX, 0, 0, scaleY, 0, 0)
+  context.clearRect(0, 0, width, height)
+  drawPlaceholderCircle(context, width, height, opacity)
 }
 
 function prepareVisualizer(
@@ -178,17 +357,48 @@ function prepareVisualizer(
     return undefined
   }
 
+  const canvasState = prepareCanvas(canvas, wrapper)
+  if (!canvasState) {
+    return undefined
+  }
+
+  const { context, paddingLeft, paddingTop, scaleX, scaleY, width, height } = canvasState
+
+  if (canvasState.resized) {
+    voronoiRef.current = new Voronoi(width, height, snapshot, colorScheme)
+  }
+
+  voronoiRef.current ??= new Voronoi(width, height, snapshot, colorScheme)
+  const layout = voronoiRef.current.getLayout(snapshot, colorScheme)
+  return {
+    context,
+    height,
+    layout,
+    paddingLeft,
+    paddingTop,
+    scaleX,
+    scaleY,
+    voronoi: voronoiRef.current,
+    width,
+  }
+}
+
+function prepareCanvas(canvas: HTMLCanvasElement | null, wrapper: HTMLDivElement | null) {
+  if (!canvas || !wrapper) {
+    return undefined
+  }
+
   const { paddingLeft, paddingTop, width, height } = getCanvasContentMetrics(canvas, wrapper)
   const devicePixelRatio = window.devicePixelRatio || 1
   const backingWidth = Math.max(1, Math.round(width * devicePixelRatio))
   const backingHeight = Math.max(1, Math.round(height * devicePixelRatio))
   const scaleX = backingWidth / width
   const scaleY = backingHeight / height
+  const resized = canvas.width !== backingWidth || canvas.height !== backingHeight
 
-  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+  if (resized) {
     canvas.width = backingWidth
     canvas.height = backingHeight
-    voronoiRef.current = new Voronoi(width, height, snapshot, colorScheme)
   }
 
   const context = canvas.getContext("2d")
@@ -196,17 +406,32 @@ function prepareVisualizer(
     return undefined
   }
 
-  voronoiRef.current ??= new Voronoi(width, height, snapshot, colorScheme)
-  const layout = voronoiRef.current.getLayout(snapshot, colorScheme)
   return {
     context,
-    layout,
+    height,
     paddingLeft,
     paddingTop,
+    resized,
     scaleX,
     scaleY,
-    voronoi: voronoiRef.current,
+    width,
   }
+}
+
+function drawPlaceholderCircle(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  opacity: number,
+) {
+  const radius = Math.max(1, Math.min(width, height) / 2)
+  context.save()
+  context.beginPath()
+  context.arc(width / 2, height / 2, radius, 0, Math.PI * 2)
+  context.fillStyle = RESIZE_PLACEHOLDER_FILL
+  context.globalAlpha = clamp(opacity, 0, 1)
+  context.fill()
+  context.restore()
 }
 
 function selectedCellAtPoint(
@@ -246,36 +471,6 @@ function selectionForCellClick(
   }
 
   return replaceSelection(memberIds)
-}
-
-function selectionProgressById(
-  selectedItemIds: readonly string[],
-  fadeStartById: Map<string, number>,
-  frameTime: number,
-) {
-  const selectedItemIdSet = new Set(selectedItemIds)
-  const progressById = new Map<string, number>()
-
-  fadeStartById.forEach((startedAt, itemId) => {
-    if (!selectedItemIdSet.has(itemId)) {
-      fadeStartById.delete(itemId)
-      return
-    }
-
-    const progress = clamp((frameTime - startedAt) / SELECTION_HIGHLIGHT_FADE_MS, 0, 1)
-    if (progress >= 1) {
-      fadeStartById.delete(itemId)
-      return
-    }
-
-    progressById.set(itemId, easeOutCubic(progress))
-  })
-
-  return progressById
-}
-
-function easeOutCubic(value: number) {
-  return 1 - (1 - value) ** 3
 }
 
 function clamp(value: number, min: number, max: number) {

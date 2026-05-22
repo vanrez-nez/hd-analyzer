@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
+import { animate } from "motion"
 
 import {
   ResizableHandle,
@@ -25,6 +26,10 @@ const SPLIT_ANIMATION_MS = 180
 const VISUALIZER_COLLAPSED_SIZE_THRESHOLD = 0.5
 const VISUALIZER_TOP_OFFSET_CLASS = "pt-11"
 
+type MotionControls = {
+  stop: () => void
+}
+
 type LayoutProps = {
   colorScheme: ColorScheme
   permissionChecking: boolean
@@ -43,7 +48,7 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
     items: [],
     generation: "volumes:",
   })
-  const animationFrameRef = useRef<number | undefined>(undefined)
+  const splitAnimationRef = useRef<MotionControls | undefined>(undefined)
   const explorerPanelRef = useRef<PanelImperativeHandle | null>(null)
   const hasMountedRef = useRef(false)
   const ignoreLayoutChangeRef = useRef(false)
@@ -75,7 +80,8 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
       return
     }
 
-    window.cancelAnimationFrame(animationFrameRef.current ?? 0)
+    splitAnimationRef.current?.stop()
+    splitAnimationRef.current = undefined
 
     if (!splitOpen && skipNextCloseAnimationRef.current) {
       skipNextCloseAnimationRef.current = false
@@ -94,42 +100,49 @@ export function Layout({ colorScheme, permissionChecking, onRequestPermissions }
     const startVisualizer = getPanelPercentage(visualizerPanel, splitOpen ? 0 : targetLayout.visualizer)
     const targetExplorer = splitOpen ? targetLayout.explorer : 100
     const targetVisualizer = splitOpen ? targetLayout.visualizer : 0
-    const startedAt = performance.now()
 
-    const animate = (frameTime: number) => {
-      const progress = Math.min(1, (frameTime - startedAt) / SPLIT_ANIMATION_MS)
-      const eased = easeOutCubic(progress)
-      const explorerSize = interpolateNumber(startExplorer, targetExplorer, eased)
-      const visualizerSize = interpolateNumber(startVisualizer, targetVisualizer, eased)
+    const animation = animate(0, 1, {
+      duration: SPLIT_ANIMATION_MS / 1000,
+      ease: "easeOut",
+      onUpdate: (progress) => {
+        const explorerSize = interpolateNumber(startExplorer, targetExplorer, progress)
+        const visualizerSize = interpolateNumber(startVisualizer, targetVisualizer, progress)
 
-      explorerPanel.resize(`${explorerSize}%`)
-      visualizerPanel.resize(`${visualizerSize}%`)
+        explorerPanel.resize(`${explorerSize}%`)
+        visualizerPanel.resize(`${visualizerSize}%`)
+      },
+      onComplete: () => {
+        if (splitAnimationRef.current !== animation) {
+          return
+        }
 
-      if (progress < 1) {
-        animationFrameRef.current = window.requestAnimationFrame(animate)
-        return
-      }
+        splitAnimationRef.current = undefined
+        explorerPanel.resize(`${targetExplorer}%`)
+        if (splitOpen) {
+          visualizerPanel.resize(`${targetVisualizer}%`)
+        } else {
+          visualizerPanel.collapse()
+        }
 
-      explorerPanel.resize(`${targetExplorer}%`)
-      if (splitOpen) {
-        visualizerPanel.resize(`${targetVisualizer}%`)
-      } else {
-        visualizerPanel.collapse()
-      }
+        ignoreLayoutChangeRef.current = false
+        setSplitAnimating(false)
+      },
+    })
 
-      ignoreLayoutChangeRef.current = false
-      setSplitAnimating(false)
-    }
+    splitAnimationRef.current = animation
 
-    animationFrameRef.current = window.requestAnimationFrame(animate)
     return () => {
-      window.cancelAnimationFrame(animationFrameRef.current ?? 0)
+      if (splitAnimationRef.current === animation) {
+        animation.stop()
+        splitAnimationRef.current = undefined
+      }
     }
   }, [splitOpen])
 
   useEffect(() => {
     return () => {
-      window.cancelAnimationFrame(animationFrameRef.current ?? 0)
+      splitAnimationRef.current?.stop()
+      splitAnimationRef.current = undefined
     }
   }, [])
 
@@ -219,8 +232,4 @@ function getPanelPercentage(panel: PanelImperativeHandle, fallback: number) {
 
 function interpolateNumber(from: number, to: number, amount: number) {
   return from + (to - from) * amount
-}
-
-function easeOutCubic(value: number) {
-  return 1 - (1 - value) ** 3
 }

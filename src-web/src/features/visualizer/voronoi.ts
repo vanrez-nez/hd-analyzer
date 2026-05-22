@@ -135,6 +135,7 @@ const DEFAULT_PARAMS: NormalizedClusterParams = {
 }
 const DEFAULT_SEED = 0x5eed
 const CIRCLE_SEGMENTS = 196
+const CIRCLE_FRAME_STROKE_WIDTH = 2
 const UNTYPED = Symbol("untyped")
 
 function isTypePartition(partitionType: PartitionType) {
@@ -932,10 +933,11 @@ function summarizeTreemapNode(node: TreemapNode) {
 }
 
 function createCircleBounds(width: number, height: number): CircleBounds {
+  const radiusInset = CIRCLE_FRAME_STROKE_WIDTH / 2
   return {
     centerX: width / 2,
     centerY: height / 2,
-    radius: Math.max(1, Math.min(width, height) / 2),
+    radius: Math.max(1, Math.min(width, height) / 2 - radiusInset),
   }
 }
 
@@ -961,7 +963,7 @@ function drawCircleFrame(context: CanvasRenderingContext2D, circle: CircleBounds
   context.save()
   drawCirclePath(context, circle)
   context.strokeStyle = "hsl(0 0% 100% / 0.16)"
-  context.lineWidth = 1
+  context.lineWidth = CIRCLE_FRAME_STROKE_WIDTH
   context.stroke()
   context.restore()
 }
