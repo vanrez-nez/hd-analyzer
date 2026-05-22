@@ -19,6 +19,7 @@ export const HONEYCOMB_MIN_RESAMPLE_POINTS = 4
 export const HONEYCOMB_MAX_RESAMPLE_POINTS = 24
 export const HONEYCOMB_SMALL_RADIUS = 8
 export const HONEYCOMB_LARGE_RADIUS = 48
+export const HONEYCOMB_BORDER_VISIBILITY_THRESHOLD = 0.001
 export const HONEYCOMB_DEBUG_INSET = false
 export const LABEL_FONT_SIZE_MIN = 9
 export const LABEL_FONT_SIZE_MAX = 13
@@ -123,16 +124,17 @@ function drawHoneycombCell(
   }
 
   const selectionProgress = selectedCellProgress(cell, options)
+  const normalBorderVisible = isNormalBorderVisible(area, layoutCircleArea)
 
   if (area < options.minCellArea) {
-    drawInscribedCircle(context, cell, options, selectionProgress, undefined, layoutCircleArea)
+    drawInscribedCircle(context, cell, options, selectionProgress, normalBorderVisible, undefined, layoutCircleArea)
     return
   }
 
   const style = resolveCellStyle(area, options)
   const inset = insetConvexPolygon(cell.polygon, style.separation)
   if (!inset || polygonAbsArea(inset) < options.minCellArea) {
-    drawInscribedCircle(context, cell, options, selectionProgress, undefined, layoutCircleArea)
+    drawInscribedCircle(context, cell, options, selectionProgress, normalBorderVisible, undefined, layoutCircleArea)
     return
   }
 
@@ -140,7 +142,7 @@ function drawHoneycombCell(
     drawInsetDebug(context, cell.polygon, inset, style.separation)
   }
 
-  drawSmoothCell(context, cell, options, inset, style, selectionProgress)
+  drawSmoothCell(context, cell, options, inset, style, selectionProgress, normalBorderVisible)
   drawCellLabel(context, cell, approximateInscribedCircle(inset), layoutCircleArea, options)
 }
 
@@ -184,12 +186,13 @@ function resolveCellDrawStyle(
   cell: VisualizerLayoutCell,
   options: ResolvedHoneycombOptions,
   selected: boolean,
+  normalBorderVisible: boolean,
 ): HoneycombDrawStyle {
   if (!selected) {
     return {
       fill: cell.fillColor,
       stroke: borderColorForCell(cell.fillColor, options.colorScheme),
-      lineWidth: 1,
+      lineWidth: normalBorderVisible ? 1 : 0,
     }
   }
 
@@ -204,13 +207,14 @@ function resolveAnimatedCellDrawStyle(
   cell: VisualizerLayoutCell,
   options: ResolvedHoneycombOptions,
   selectionProgress: number | undefined,
+  normalBorderVisible: boolean,
 ) {
-  const baseStyle = resolveCellDrawStyle(cell, options, false)
+  const baseStyle = resolveCellDrawStyle(cell, options, false, normalBorderVisible)
   if (selectionProgress === undefined) {
     return baseStyle
   }
 
-  const selectedStyle = resolveCellDrawStyle(cell, options, true)
+  const selectedStyle = resolveCellDrawStyle(cell, options, true, normalBorderVisible)
   if (selectionProgress >= 1) {
     return selectedStyle
   }
@@ -230,8 +234,9 @@ function drawSmoothCell(
   inset: VisualizerPoint[],
   style: HoneycombCellStyle,
   selectionProgress: number | undefined,
+  normalBorderVisible: boolean,
 ) {
-  const cellStyle = resolveAnimatedCellDrawStyle(cell, options, selectionProgress)
+  const cellStyle = resolveAnimatedCellDrawStyle(cell, options, selectionProgress, normalBorderVisible)
   drawSmoothPolygon(
     context,
     inset,
@@ -248,6 +253,7 @@ function drawInscribedCircle(
   cell: VisualizerLayoutCell,
   options: ResolvedHoneycombOptions,
   selectionProgress: number | undefined,
+  normalBorderVisible: boolean,
   circle = approximateInscribedCircle(cell.polygon),
   layoutCircleArea = Infinity,
 ) {
@@ -255,7 +261,12 @@ function drawInscribedCircle(
     return
   }
 
-  drawCircleShape(context, circle, resolveAnimatedCellDrawStyle(cell, options, selectionProgress), 0.92)
+  drawCircleShape(
+    context,
+    circle,
+    resolveAnimatedCellDrawStyle(cell, options, selectionProgress, normalBorderVisible),
+    0.92,
+  )
   drawCellLabel(context, cell, circle, layoutCircleArea, options)
 }
 
@@ -271,9 +282,7 @@ function drawCircleShape(
   context.fillStyle = cellStyle.fill
   context.globalAlpha = alpha
   context.fill()
-  context.strokeStyle = cellStyle.stroke
-  context.lineWidth = cellStyle.lineWidth
-  context.stroke()
+  strokeCurrentPath(context, cellStyle.stroke, cellStyle.lineWidth)
   context.restore()
 }
 
@@ -381,9 +390,7 @@ function drawSmoothPolygon(
   context.fillStyle = fillStyle
   context.globalAlpha = alpha
   context.fill()
-  context.strokeStyle = strokeStyle
-  context.lineWidth = lineWidth
-  context.stroke()
+  strokeCurrentPath(context, strokeStyle, lineWidth)
   context.restore()
 }
 
@@ -414,9 +421,7 @@ function drawLinearPolygon(
   context.fillStyle = fillStyle
   context.globalAlpha = alpha
   context.fill()
-  context.strokeStyle = strokeStyle
-  context.lineWidth = lineWidth
-  context.stroke()
+  strokeCurrentPath(context, strokeStyle, lineWidth)
   context.restore()
 }
 
@@ -680,6 +685,24 @@ function selectedCellProgress(cell: VisualizerLayoutCell, options: ResolvedHoney
 
 function selectedCellCandidateIds(cell: VisualizerLayoutCell) {
   return [cell.id, cell.selectionId, ...cell.memberIds]
+}
+
+function isNormalBorderVisible(area: number, layoutCircleArea: number) {
+  return (
+    Number.isFinite(layoutCircleArea) &&
+    layoutCircleArea > 0 &&
+    area / layoutCircleArea >= HONEYCOMB_BORDER_VISIBILITY_THRESHOLD
+  )
+}
+
+function strokeCurrentPath(context: CanvasRenderingContext2D, strokeStyle: string, lineWidth: number) {
+  if (lineWidth <= 0) {
+    return
+  }
+
+  context.strokeStyle = strokeStyle
+  context.lineWidth = lineWidth
+  context.stroke()
 }
 
 function borderColorForCell(fillStyle: string, colorScheme: ColorScheme) {
