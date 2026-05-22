@@ -68,10 +68,6 @@ type RowCounts = {
   files: number
   volumes: number
 }
-type RowsRenderedRange = {
-  startIndex: number
-  stopIndex: number
-}
 type ExplorerTableStyle = CSSProperties & {
   "--explorer-size-column-width": string
 }
@@ -121,8 +117,9 @@ export function ExplorerTable({
   onSelectionChange,
 }: ExplorerTableProps) {
   const listRef = useRef<List | null>(null)
+  const lastSelectionKeyRef = useRef(selectionKey(selectedItemIds))
+  const suppressNextSelectionScrollRef = useRef(false)
   const [sort, setSort] = useState<SortState>({ column: "size", direction: "desc" })
-  const [scrollToIndex, setScrollToIndex] = useState<number>()
   const rows = useMemo<ExplorerRow[]>(() => {
     return listing ? sortNodes(listing.children, sort) : sortVolumes(volumes, sort)
   }, [listing, sort, volumes])
@@ -148,26 +145,50 @@ export function ExplorerTable({
   }, [liveUpdates, loadingPath, selectedItemIds])
 
   useEffect(() => {
+    const currentSelectionKey = selectionKey(selectedItemIds)
+    const selectionChanged = currentSelectionKey !== lastSelectionKeyRef.current
+    lastSelectionKeyRef.current = currentSelectionKey
+
+    if (!selectionChanged) {
+      return
+    }
+
+    if (suppressNextSelectionScrollRef.current) {
+      suppressNextSelectionScrollRef.current = false
+      return
+    }
+
     if (selectedItemIds.length === 0) {
-      setScrollToIndex(undefined)
       return
     }
 
     const nextIndex = findFirstSelectedRowIndex(rows, selectedItemSet)
-    setScrollToIndex(nextIndex === -1 ? undefined : nextIndex)
+    if (nextIndex !== -1) {
+      listRef.current?.scrollToRow(nextIndex)
+    }
   }, [rows, selectedItemIds, selectedItemSet])
+
+  const updateTableSelection = useCallback(
+    (nextSelectedItemIds: string[]) => {
+      if (selectionKey(nextSelectedItemIds) !== selectionKey(selectedItemIds)) {
+        suppressNextSelectionScrollRef.current = true
+      }
+      onSelectionChange(nextSelectedItemIds)
+    },
+    [onSelectionChange, selectedItemIds],
+  )
 
   const selectRow = useCallback(
     (row: ExplorerRow, index: number, event: MouseEvent<HTMLElement>) => {
       const itemId = rowId(row)
       if (!isPathNode(row)) {
-        onSelectionChange(replaceSelection([itemId]))
+        updateTableSelection(replaceSelection([itemId]))
         onSelectionAnchorChange(itemId)
         return
       }
 
       if (event.shiftKey) {
-        onSelectionChange(rangeSelectionFromRows(rows, selectionAnchorId, index))
+        updateTableSelection(rangeSelectionFromRows(rows, selectionAnchorId, index))
         if (!selectionAnchorId) {
           onSelectionAnchorChange(itemId)
         }
@@ -175,15 +196,15 @@ export function ExplorerTable({
       }
 
       if (isToggleSelectionInput(event)) {
-        onSelectionChange(toggleSelection(selectedItemIds, [itemId]))
+        updateTableSelection(toggleSelection(selectedItemIds, [itemId]))
         onSelectionAnchorChange(itemId)
         return
       }
 
-      onSelectionChange(replaceSelection([itemId]))
+      updateTableSelection(replaceSelection([itemId]))
       onSelectionAnchorChange(itemId)
     },
-    [onSelectionAnchorChange, onSelectionChange, rows, selectedItemIds, selectionAnchorId],
+    [onSelectionAnchorChange, rows, selectedItemIds, selectionAnchorId, updateTableSelection],
   )
 
   const openRow = useCallback(
@@ -209,7 +230,7 @@ export function ExplorerTable({
       return
     }
 
-    onSelectionChange([])
+    updateTableSelection([])
     onSelectionAnchorChange(null)
   }
 
@@ -219,19 +240,6 @@ export function ExplorerTable({
       direction: current.column === column && current.direction === "desc" ? "asc" : "desc",
     }))
   }
-
-  const handleRowsRendered = useCallback(
-    ({ startIndex, stopIndex }: RowsRenderedRange) => {
-      if (scrollToIndex === undefined) {
-        return
-      }
-
-      if (scrollToIndex >= startIndex && scrollToIndex <= stopIndex) {
-        setScrollToIndex(undefined)
-      }
-    },
-    [scrollToIndex],
-  )
 
   const renderRow = useCallback(
     ({ index, key, style }: ListRowProps) => {
@@ -307,11 +315,9 @@ export function ExplorerTable({
                   rowHeight={ROW_HEIGHT}
                   rowRenderer={renderRow}
                   scrollToAlignment="auto"
-                  scrollToIndex={scrollToIndex ?? -1}
                   style={{ overflowX: "hidden", overscrollBehavior: "none" }}
                   tabIndex={0}
                   width={width}
-                  onRowsRendered={handleRowsRendered}
                 />
               )
             }}
@@ -660,6 +666,10 @@ function findRowIndexById(rows: ExplorerRow[], itemId: string) {
 
 function rowId(row: ExplorerRow) {
   return isPathNode(row) ? row.path : row.id
+}
+
+function selectionKey(itemIds: readonly string[]) {
+  return itemIds.join("\u0000")
 }
 
 function rowTitle(row: ExplorerRow) {

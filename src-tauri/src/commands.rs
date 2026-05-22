@@ -13,6 +13,8 @@ use crate::dto::{
 };
 use crate::state::AppState;
 
+const REPOSITORY_HOMEPAGE_URL: &str = "https://github.com/vanrez-nez/hd-analyzer";
+
 #[tauri::command]
 pub fn fs_list_volumes(state: State<'_, AppState>) -> Result<Vec<DriveDto>, CommandError> {
     log::info!("listing filesystem explorer volumes");
@@ -318,6 +320,20 @@ pub fn fs_preview_item(path: String, app: AppHandle) -> Result<(), CommandError>
             CommandError::new(
                 CommandErrorCode::OpenItemFailed,
                 format!("Failed to preview {}: {error}", path.display()),
+            )
+        })
+}
+
+#[tauri::command]
+pub fn open_repository_homepage(app: AppHandle) -> Result<(), CommandError> {
+    log::info!("opening repository homepage {REPOSITORY_HOMEPAGE_URL}");
+    app.opener()
+        .open_url(REPOSITORY_HOMEPAGE_URL, None::<&str>)
+        .map_err(|error| {
+            log::warn!("failed to open repository homepage: {error}");
+            CommandError::new(
+                CommandErrorCode::OpenItemFailed,
+                format!("Failed to open repository homepage: {error}"),
             )
         })
 }

@@ -1,7 +1,16 @@
 import { useEffect, useRef } from "react"
 import type { MouseEvent, MutableRefObject } from "react"
 import { animate } from "motion"
+import { ExternalLinkIcon } from "lucide-react"
 
+import { openRepositoryHomepage } from "@/api"
+import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { VisualizerLevelSnapshot } from "./types"
 import { Honeycomb } from "./honeycomb"
 import { LegendVisualizer } from "./legend-visualizer"
@@ -287,8 +296,25 @@ export function Visualizer({
         }}
       />
       <LegendVisualizer items={snapshot.items} />
-      <div className="pointer-events-none absolute bottom-3 right-3 select-none font-mono text-[0.6875rem] text-muted-foreground/55">
-        v{__APP_VERSION__}
+      <div className="absolute bottom-3 right-3 flex select-none items-center gap-1.5 font-mono text-[0.6875rem] text-muted-foreground/55">
+        <span>v{__APP_VERSION__}</span>
+        <TooltipProvider delayDuration={250}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label="Open repository homepage"
+                className="size-6 rounded-sm text-muted-foreground/55 hover:text-muted-foreground"
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={() => void openRepositoryHomepage()}
+              >
+                <ExternalLinkIcon aria-hidden="true" data-icon="inline-start" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Repository homepage</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
     </div>
   )

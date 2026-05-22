@@ -5,7 +5,7 @@ mod state;
 use commands::{
     check_permissions, fs_cancel_job, fs_delete_items, fs_get_directory, fs_invalidate_path,
     fs_list_volumes, fs_open_folder, fs_open_path, fs_open_path_with_progress, fs_open_terminal,
-    fs_preview_item, fs_reveal_items, fs_start_scan,
+    fs_preview_item, fs_reveal_items, fs_start_scan, open_repository_homepage,
 };
 use state::AppState;
 use tauri_plugin_log::{Target, TargetKind};
@@ -45,6 +45,7 @@ pub fn run() {
             fs_open_terminal,
             fs_reveal_items,
             fs_preview_item,
+            open_repository_homepage,
             check_permissions
         ])
         .run(tauri::generate_context!())

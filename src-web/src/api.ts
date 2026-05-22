@@ -179,6 +179,17 @@ export async function previewItem(path: string): Promise<void> {
   }
 }
 
+export async function openRepositoryHomepage(): Promise<void> {
+  await appLog.info("open repository homepage started")
+  try {
+    await invokeLogged<void>("open_repository_homepage")
+    await appLog.info("open repository homepage completed")
+  } catch (error) {
+    await appLog.error("open repository homepage failed", { error })
+    throw error
+  }
+}
+
 export async function deleteItems(
   paths: string[],
   volumeRoot: string,
