@@ -55,6 +55,20 @@ npm --prefix src-web run typecheck
 npm --prefix src-web run build
 ```
 
+## Releases
+
+Build a local macOS DMG from the repository root:
+```bash
+npm --prefix src-web run tauri:build:dmg
+```
+
+Create a draft GitHub release with an automated version bump, commit, tag, DMG build, and asset upload:
+```bash
+npm --prefix src-web run release:github -- patch
+```
+
+Use `minor` or `major` instead of `patch` when preparing larger SemVer releases. The release script requires a clean git working tree and GitHub CLI authentication.
+
 ## Built With
 - [Rust](https://www.rust-lang.org/)
 - [Tauri](https://tauri.app/)

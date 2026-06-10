@@ -10,7 +10,9 @@
     "lint": "tsc -b --pretty false",
     "tauri": "cd .. && src-web/node_modules/.bin/tauri",
     "tauri:dev": "cd .. && src-web/node_modules/.bin/tauri dev",
-    "tauri:build": "cd .. && src-web/node_modules/.bin/tauri build"
+    "tauri:build": "cd .. && src-web/node_modules/.bin/tauri build",
+    "tauri:build:dmg": "cd .. && scripts/build-dmg.sh",
+    "release:github": "cd .. && scripts/release-github.sh"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
