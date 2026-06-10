@@ -6,10 +6,16 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release-github.sh <major|minor|patch>
+Usage:
+  scripts/release-github.sh <major|minor|patch>
+  scripts/release-github.sh --resume <version>
 
 Bumps all app versions, validates the workspace, builds the macOS DMG,
 commits/tags/pushes the release, and creates a draft GitHub release.
+
+Use --resume when a previous release run already bumped versions and built
+the DMG but stopped before committing, tagging, pushing, or creating the
+GitHub release.
 EOF
 }
 
@@ -26,9 +32,69 @@ run() {
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+release_files=(
+  Cargo.toml
+  Cargo.lock
+  src-tauri/tauri.conf.json
+  src-web/package.json
+  src-web/package-lock.json
+)
+
+ensure_gh_auth() {
+  if gh auth status >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "GitHub CLI is not authenticated. Starting: gh auth login -h github.com"
+  run gh auth login -h github.com
+  run gh auth status >/dev/null
+}
+
+ensure_clean() {
+  [[ -z "$(git status --porcelain)" ]] || die "working tree must be clean before releasing"
+}
+
+ensure_resume_dirty_files_are_expected() {
+  local allowed=("${release_files[@]}" "scripts/release-github.sh")
+  local unexpected=()
+  local line path
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    path="${line:3}"
+    case " ${allowed[*]} " in
+      *" ${path} "*) ;;
+      *) unexpected+=("$path") ;;
+    esac
+  done < <(git status --porcelain)
+
+  if (( ${#unexpected[@]} > 0 )); then
+    printf 'error: --resume only allows release files to be dirty. Unexpected paths:\n' >&2
+    printf '  %s\n' "${unexpected[@]}" >&2
+    exit 1
+  fi
+}
+
+find_dmg() {
+  local version="$1"
+  for dir in target src-tauri/target; do
+    [[ -d "$dir" ]] || continue
+    find "$dir" -path "*/bundle/dmg/*${version}*.dmg" -type f -print
+  done | head -n 1
+}
+
+mode="bump"
 bump="${1:-}"
+resume_version=""
+
 case "$bump" in
   major|minor|patch) ;;
+  --resume|resume)
+    mode="resume"
+    resume_version="${2:-}"
+    [[ "$resume_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+      || die "--resume requires a plain SemVer version, for example: scripts/release-github.sh --resume 0.2.0"
+    ;;
   -h|--help|"")
     usage
     exit 0
@@ -47,14 +113,18 @@ done
 
 [[ -d src-web/node_modules ]] || die "missing src-web/node_modules. Run: npm --prefix src-web install"
 
-[[ -z "$(git status --porcelain)" ]] || die "working tree must be clean before releasing"
-
 branch="$(git branch --show-current)"
 [[ -n "$branch" ]] || die "must be on a branch, not detached HEAD"
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" \
   || die "current branch must have an upstream remote"
 
-run gh auth status >/dev/null
+if [[ "$mode" == "resume" ]]; then
+  ensure_resume_dirty_files_are_expected
+else
+  ensure_clean
+fi
+
+ensure_gh_auth
 
 cat > "$tmp_dir/read-versions.js" <<'NODE'
 const fs = require("fs");
@@ -133,13 +203,21 @@ NODE
 
 versions_json="$(node "$tmp_dir/read-versions.js")"
 current_version="$(VERSIONS_JSON="$versions_json" node "$tmp_dir/current-version.js")"
-next_version="$(CURRENT_VERSION="$current_version" BUMP="$bump" node "$tmp_dir/next-version.js")"
+
+if [[ "$mode" == "resume" ]]; then
+  [[ "$current_version" == "$resume_version" ]] \
+    || die "--resume ${resume_version} does not match synchronized version files at ${current_version}"
+  next_version="$resume_version"
+else
+  next_version="$(CURRENT_VERSION="$current_version" BUMP="$bump" node "$tmp_dir/next-version.js")"
+fi
+
 tag="v${next_version}"
 
 git rev-parse "$tag" >/dev/null 2>&1 && die "local tag already exists: $tag"
 git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1 && die "remote tag already exists: $tag"
 
-echo "Preparing release ${tag} from ${current_version} on ${branch} (${upstream})"
+echo "Preparing release ${tag} on ${branch} (${upstream})"
 
 cat > "$tmp_dir/update-versions.js" <<'NODE'
 const fs = require("fs");
@@ -206,17 +284,26 @@ const lockNext = lockText
 write(lockPath, lockNext);
 NODE
 
-CURRENT_VERSION="$current_version" NEXT_VERSION="$next_version" node "$tmp_dir/update-versions.js"
+if [[ "$mode" == "bump" ]]; then
+  CURRENT_VERSION="$current_version" NEXT_VERSION="$next_version" node "$tmp_dir/update-versions.js"
 
-run cargo fmt --check
-run cargo test
-run npm --prefix src-web run typecheck
-run scripts/build-dmg.sh
+  run cargo fmt --check
+  run cargo test
+  run npm --prefix src-web run typecheck
+  run scripts/build-dmg.sh
+fi
 
-dmg="$(find target src-tauri/target -path "*/bundle/dmg/*${next_version}*.dmg" -type f -print 2>/dev/null | head -n 1)"
+dmg="$(find_dmg "$next_version")"
+if [[ -z "$dmg" ]]; then
+  run scripts/build-dmg.sh
+  dmg="$(find_dmg "$next_version")"
+fi
 [[ -n "$dmg" ]] || die "could not find DMG for version ${next_version}"
 
-run git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json src-web/package.json src-web/package-lock.json
+run git add "${release_files[@]}"
+if ! git diff --quiet -- scripts/release-github.sh; then
+  run git add scripts/release-github.sh
+fi
 run git commit -m "chore: release ${tag}"
 run git tag -a "$tag" -m "Release ${tag}"
 run git push origin "$branch"

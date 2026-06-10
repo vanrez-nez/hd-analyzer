@@ -3586,7 +3586,7 @@ dependencies = [
 
 [[package]]
 name = "space-lenser-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "core-foundation-sys",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "space-lenser-tauri"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "serde",
