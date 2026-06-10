@@ -67,7 +67,17 @@ Create a draft GitHub release with an automated version bump, commit, tag, DMG b
 npm --prefix src-web run release:github -- patch
 ```
 
-Use `minor` or `major` instead of `patch` when preparing larger SemVer releases. The release script requires a clean git working tree and GitHub CLI authentication.
+Use `minor` or `major` instead of `patch` when preparing larger SemVer releases. The release script requires a clean git working tree, GitHub CLI authentication, Developer ID signing, and Apple notarization credentials.
+
+For local macOS signing, set:
+```bash
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export APPLE_API_KEY="KEYID"
+export APPLE_API_ISSUER="ISSUER-UUID"
+export APPLE_API_KEY_PATH="/path/to/AuthKey_KEYID.p8"
+```
+
+Unsigned test-only releases can be forced with `ALLOW_UNSIGNED_MACOS_RELEASE=1`, but downloaded apps may be blocked by Gatekeeper.
 
 ## Built With
 - [Rust](https://www.rust-lang.org/)

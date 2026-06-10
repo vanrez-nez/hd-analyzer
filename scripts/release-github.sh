@@ -35,6 +35,9 @@ trap 'rm -rf "$tmp_dir"' EXIT
 release_files=(
   Cargo.toml
   Cargo.lock
+  README.md
+  scripts/build-dmg.sh
+  scripts/release-github.sh
   src-tauri/tauri.conf.json
   src-web/package.json
   src-web/package-lock.json
@@ -54,8 +57,23 @@ ensure_clean() {
   [[ -z "$(git status --porcelain)" ]] || die "working tree must be clean before releasing"
 }
 
+ensure_macos_distribution_signing() {
+  if [[ "${ALLOW_UNSIGNED_MACOS_RELEASE:-0}" == "1" ]]; then
+    echo "warning: ALLOW_UNSIGNED_MACOS_RELEASE=1 set; release may show macOS Gatekeeper 'damaged' warnings after download" >&2
+    return
+  fi
+
+  if [[ -z "${APPLE_SIGNING_IDENTITY:-}" && -z "${APPLE_CERTIFICATE:-}" ]]; then
+    die "macOS release requires Developer ID signing. Set APPLE_SIGNING_IDENTITY for a local keychain identity or APPLE_CERTIFICATE for CI, or set ALLOW_UNSIGNED_MACOS_RELEASE=1 for a test-only unsigned release"
+  fi
+
+  if [[ -z "${APPLE_API_KEY:-}" || -z "${APPLE_API_ISSUER:-}" || -z "${APPLE_API_KEY_PATH:-}" ]]; then
+    die "macOS release requires notarization credentials: APPLE_API_KEY, APPLE_API_ISSUER, and APPLE_API_KEY_PATH. Use ALLOW_UNSIGNED_MACOS_RELEASE=1 only for private test releases"
+  fi
+}
+
 ensure_resume_dirty_files_are_expected() {
-  local allowed=("${release_files[@]}" "scripts/release-github.sh")
+  local allowed=("${release_files[@]}")
   local unexpected=()
   local line path
 
@@ -112,6 +130,8 @@ for cmd in cargo gh git node npm; do
 done
 
 [[ -d src-web/node_modules ]] || die "missing src-web/node_modules. Run: npm --prefix src-web install"
+
+ensure_macos_distribution_signing
 
 branch="$(git branch --show-current)"
 [[ -n "$branch" ]] || die "must be on a branch, not detached HEAD"
@@ -301,9 +321,6 @@ fi
 [[ -n "$dmg" ]] || die "could not find DMG for version ${next_version}"
 
 run git add "${release_files[@]}"
-if ! git diff --quiet -- scripts/release-github.sh; then
-  run git add scripts/release-github.sh
-fi
 run git commit -m "chore: release ${tag}"
 run git tag -a "$tag" -m "Release ${tag}"
 run git push origin "$branch"

@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "DMG bundles can only be built on macOS." >&2
@@ -15,6 +17,26 @@ if [[ ! -d src-web/node_modules ]]; then
 fi
 
 args=(build --bundles dmg --ci)
+
+if [[ -n "${APPLE_SIGNING_IDENTITY:-}" || -n "${APPLE_PROVIDER_SHORT_NAME:-}" ]]; then
+  signing_config="$tmp_dir/tauri-signing.json"
+  APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}" \
+    APPLE_PROVIDER_SHORT_NAME="${APPLE_PROVIDER_SHORT_NAME:-}" \
+    node <<'NODE' > "$signing_config"
+const macOS = {};
+
+if (process.env.APPLE_SIGNING_IDENTITY) {
+  macOS.signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
+}
+
+if (process.env.APPLE_PROVIDER_SHORT_NAME) {
+  macOS.providerShortName = process.env.APPLE_PROVIDER_SHORT_NAME;
+}
+
+console.log(JSON.stringify({ bundle: { macOS } }));
+NODE
+  args+=(--config "$signing_config")
+fi
 
 if [[ -n "${TAURI_TARGET:-}" ]]; then
   args+=(--target "$TAURI_TARGET")
